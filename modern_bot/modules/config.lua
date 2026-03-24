@@ -15,7 +15,7 @@ local DEFAULTS = {
     hold_btn_idx  = 1,
     hold_forward  = false,
     hold_back     = false,
-    player_side   = 0,
+    player_side   = 0,  -- 0=Auto, 1=P1, 2=P2
 }
 
 local function make_defaults()

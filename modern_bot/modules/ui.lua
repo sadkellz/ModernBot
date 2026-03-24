@@ -35,7 +35,10 @@ function module.init(deps)
             ---------------------------------------------------------------
             section_header("Player")
             ---------------------------------------------------------------
-            changed, cfg.player_side = imgui.combo("Side", cfg.player_side, {"Auto", "P1", "P2"})
+            -- combo is 1-based, player_side is 0-based (0=Auto, 1=P1, 2=P2)
+            local side_combo = cfg.player_side + 1
+            changed, side_combo = imgui.combo("Side", side_combo, {"Auto", "P1", "P2"})
+            if changed then cfg.player_side = side_combo - 1 end
 
             ---------------------------------------------------------------
             section_header("Pulse")
@@ -88,8 +91,8 @@ function module.init(deps)
 
             imgui.same_line()
             imgui.push_style_color(0, COL_MUTED)
-            local side_str = bd.detected_side and ("P" .. bd.detected_side .. " (auto)") or
-                             cfg.player_side ~= 0 and ("P" .. cfg.player_side) or "..."
+            local side_str = bd.detected_side and ("P" .. bd.detected_side) or
+                             cfg.player_side > 0 and ("P" .. cfg.player_side .. " (manual)") or "..."
             imgui.text("| " .. side_str)
             imgui.pop_style_color(1)
 

@@ -26,12 +26,12 @@ local cfg = config and config.cfg
 ---------------------------------------------------------------------------
 sdk.hook(
     sdk.find_type_definition("app.FBattleInput"):get_method("confirmBattleInput"),
-    function(args) battle.data.fbattle = sdk.to_managed_object(args[2]) end,
+    function(args) end,
     function(retval)
-        battle.on_frame(cfg.player_side)
+        battle.on_frame(cfg)
 
         if not cfg.master then input.release_all() return retval end
-        if not battle.data.in_match or not battle.data.detected_side then
+        if not battle.data.is_fighting or not battle.data.detected_side then
             return retval
         end
 
