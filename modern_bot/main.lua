@@ -1,6 +1,4 @@
-log.debug("Loading EZ Claude...")
-
--- VK codes for keyboard bindings (WASD = directions, UIJKLO = buttons)
+-- VK codes
 local VK = {
     W = 87, A = 65, S = 83, D = 68,
     U = 85, I = 73, O = 79,
@@ -8,12 +6,12 @@ local VK = {
 }
 
 local BUTTONS = {
-    {name = "Light (U)",  vk = VK.U},
-    {name = "Medium (J)", vk = VK.J},
-    {name = "Heavy (K)",  vk = VK.K},
-    {name = "SP (I)",     vk = VK.I},
-    {name = "DP (O)",     vk = VK.O},
-    {name = "Auto (L)",   vk = VK.L},
+    {name = "Light",  vk = VK.U},
+    {name = "Medium", vk = VK.J},
+    {name = "Heavy",  vk = VK.K},
+    {name = "SP",     vk = VK.I},
+    {name = "DP",     vk = VK.O},
+    {name = "Auto",   vk = VK.L},
 }
 local BUTTON_NAMES = {}
 for i, b in ipairs(BUTTONS) do BUTTON_NAMES[i] = b.name end
@@ -113,13 +111,9 @@ local function save_cfg()
 end
 
 ---------------------------------------------------------------------------
--- Forward declarations
----------------------------------------------------------------------------
-local refresh_player_behaviors
-
----------------------------------------------------------------------------
 -- Match state + auto side detection
 ---------------------------------------------------------------------------
+local refresh_player_behaviors
 local fbattle = nil
 local in_match = false
 local frame = 0
@@ -320,7 +314,8 @@ end
 -- On Frame
 ---------------------------------------------------------------------------
 re.on_frame(function()
-    
+    local mirror = get_facing()
+    log.debug("[bot] mirror=" .. tostring(mirror))
 end)
 
 ---------------------------------------------------------------------------
