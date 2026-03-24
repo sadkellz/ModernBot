@@ -1,0 +1,3 @@
+[submodule "reframework-book"]
+	path = reframework-book
+	url = https://github.com/cursey/reframework-book
