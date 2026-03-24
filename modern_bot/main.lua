@@ -1,3 +1,37 @@
+---------------------------------------------------------------------------
+-- Modules
+---------------------------------------------------------------------------
+local bot_modules = {}
+local function safe_require(path)
+    local ok, mod_or_err = pcall(require, path)
+    if not ok then
+        log.debug(string.format("[bot] require('%s') failed: %s", path, tostring(mod_or_err)))
+        return nil
+    end
+    if type(mod_or_err) ~= "table" then
+        log.debug(string.format("[bot] module '%s' did not return a table (got %s)", path, type(mod_or_err)))
+        return nil
+    end
+    return mod_or_err
+end
+
+do
+    local to_load = {
+        "modules/battle",
+        "modules/ui",
+    }
+    for _, path in ipairs(to_load) do
+        local mod = safe_require(path)
+        if mod then
+            table.insert(bot_modules, mod)
+        end
+    end
+end
+
+-- Direct references for modules
+local battle = bot_modules[1]
+local ui = bot_modules[2]
+
 -- VK codes
 local VK = {
     W = 87, A = 65, S = 83, D = 68,
@@ -67,166 +101,8 @@ hook_kbd_method("CheckDown", false)
 hook_kbd_method("CheckTrigger", true)
 hook_kbd_method("CheckRepeat", false)
 
----------------------------------------------------------------------------
--- Config
----------------------------------------------------------------------------
-local CFG_PATH = "modern_bot_cfg.json"
-local CFG_DEFAULTS = {
-    master        = true,
-    enabled       = false,
-    debug_log     = false,
-    pulse_btn_idx = 1,
-    interval_min  = 30,
-    interval_max  = 90,
-    hold_min      = 2,
-    hold_max      = 5,
-    hold_enabled  = false,
-    hold_btn_idx  = 1,
-    hold_forward  = false,
-    hold_back     = false,
-    player_side   = 0,
-}
-
-local function make_defaults()
-    local t = {}
-    for k, v in pairs(CFG_DEFAULTS) do t[k] = v end
-    return t
-end
-
-local function load_cfg()
-    local ok, data = pcall(json.load_file, CFG_PATH)
-    if not ok or not data then return make_defaults() end
-    local merged = make_defaults()
-    for k, v in pairs(data) do
-        if CFG_DEFAULTS[k] ~= nil then merged[k] = v end
-    end
-    return merged
-end
-
-local cfg = load_cfg()
-
-local function save_cfg()
-    local data = {}
-    for k, _ in pairs(CFG_DEFAULTS) do data[k] = cfg[k] end
-    pcall(json.dump_file, CFG_PATH, data)
-end
-
----------------------------------------------------------------------------
--- Facing detection (before match state, since side detection needs it)
----------------------------------------------------------------------------
-local player_behaviors = {nil, nil}
-
-local function refresh_player_behaviors()
-    player_behaviors = {nil, nil}
-    local scene_mgr = sdk.get_native_singleton("via.SceneManager")
-    if not scene_mgr then return end
-    local scene = sdk.call_native_func(scene_mgr,
-        sdk.find_type_definition("via.SceneManager"), "get_CurrentScene")
-    if not scene then return end
-    local transform = scene:call("get_FirstTransform")
-    local count = 0
-    while transform and count < 500 do
-        count = count + 1
-        local go = transform:call("get_GameObject")
-        if go then
-            local pb = go:call("getComponent(System.Type)", sdk.typeof("app.PlayerBehavior"))
-            if pb then
-                if not player_behaviors[1] then
-                    player_behaviors[1] = pb
-                elseif not player_behaviors[2] then
-                    player_behaviors[2] = pb
-                    break
-                end
-            end
-        end
-        transform = transform:call("get_Next")
-    end
-end
-
-local function get_my_index()
-    return detected_side or cfg.player_side or 1
-end
-
-local function get_facing()
-    local idx = get_my_index()
-    local pb = player_behaviors[idx]
-    if not pb then
-        refresh_player_behaviors()
-        pb = player_behaviors[idx]
-        if not pb then return nil end
-    end
-    local ok, facing_right = pcall(pb.call, pb, "get_IsMirror")
-    if not ok then
-        refresh_player_behaviors()
-        pb = player_behaviors[idx]
-        if not pb then return nil end
-        ok, facing_right = pcall(pb.call, pb, "get_IsMirror")
-        if not ok then return nil end
-    end
-    return facing_right
-end
-
----------------------------------------------------------------------------
--- Match state + auto side detection
----------------------------------------------------------------------------
-local fbattle = nil
-local in_match = false
-local frame = 0
-local detected_side = nil
-local detect_phase = 0
-
-local function read_player_input(idx)
-    if not fbattle then return nil end
-    local ok, p = pcall(fbattle.call, fbattle, "GetPlayer", idx)
-    if not ok or not p then return nil end
-    local ok2, inp = pcall(p.call, p, "get_InputNew")
-    return ok2 and inp or nil
-end
-
-local function try_detect_side()
-    if cfg.player_side ~= 0 then
-        detected_side = cfg.player_side
-        refresh_player_behaviors()
-        return
-    end
-
-    -- Try getOnlineCpuBattleSelfSideIndex first (works for online + vs CPU)
-    local bf_singleton = sdk.get_managed_singleton("app.battle.bBattleFlow")
-    if bf_singleton then
-        local ok, idx = pcall(bf_singleton.call, bf_singleton, "getOnlineCpuBattleSelfSideIndex", false)
-        if ok and idx then
-            detected_side = idx + 1  -- 0-indexed -> 1-indexed
-            refresh_player_behaviors()
-            log.debug("[bot] Detected side via bBattleFlow: P" .. detected_side)
-            return
-        end
-    end
-    
-end
-
-local function reset_state()
-    release_all()
-    detected_side = nil
-    detect_phase = 0
-end
-
-local function check_match()
-    if not fbattle then
-        if in_match then
-            in_match = false
-            reset_state()
-        end
-        return false
-    end
-    local ok, p = pcall(fbattle.call, fbattle, "GetPlayer", 0)
-    local now = ok and p ~= nil
-    if now ~= in_match then
-        in_match = now
-        frame = 0
-        reset_state()
-    end
-    return in_match
-end
+-- Config lives in ui module, main just reads it
+local cfg = ui.cfg
 
 ---------------------------------------------------------------------------
 -- Pulse timer
@@ -250,10 +126,6 @@ local function tick_pulse()
         cur_interval = math.random(cfg.interval_min, cfg.interval_max)
         pulse_holding = cur_hold
         inject_key(BUTTONS[cfg.pulse_btn_idx].vk)
-        if cfg.debug_log then
-            log.debug(string.format("[bot] Pulse %s (hold %df, next %df)",
-                BUTTONS[cfg.pulse_btn_idx].name, cur_hold, cur_interval))
-        end
     end
 end
 
@@ -267,11 +139,7 @@ local function apply_holds()
 
     if not cfg.hold_forward and not cfg.hold_back then return end
 
-    local facing_right = get_facing()
-
-    if cfg.debug_log and frame % 60 == 1 then
-        log.debug("[bot] side=P" .. get_my_index() .. " facing_right=" .. tostring(facing_right))
-    end
+    local facing_right = battle.get_facing(cfg.player_side)
 
     -- facing_right=true: forward=D, back=A
     -- facing_right=false (facing left): forward=A, back=D
@@ -283,26 +151,18 @@ local function apply_holds()
 end
 
 ---------------------------------------------------------------------------
--- On Frame
----------------------------------------------------------------------------
-re.on_frame(function()
-    try_detect_side()
-    log.debug("[bot] detected_side=" .. tostring(detected_side) .. " is_mirror=" .. tostring(get_facing()))
-end)
-
----------------------------------------------------------------------------
 -- Main hook
 ---------------------------------------------------------------------------
+local fbattle = nil
+
 sdk.hook(
     sdk.find_type_definition("app.FBattleInput"):get_method("confirmBattleInput"),
     function(args) fbattle = sdk.to_managed_object(args[2]) end,
     function(retval)
-        if not cfg.master then release_all() return retval end
-        if not check_match() then return retval end
-        frame = frame + 1
+        battle.update(fbattle, cfg.player_side)
 
-        if not detected_side then
-            try_detect_side()
+        if not cfg.master then release_all() return retval end
+        if not battle.data.in_match or not battle.data.detected_side then
             return retval
         end
 
@@ -318,50 +178,13 @@ sdk.hook(
 )
 
 ---------------------------------------------------------------------------
--- UI
+-- Init UI
 ---------------------------------------------------------------------------
-re.on_draw_ui(function()
-    if imgui.tree_node("Modern Bot") then
-        local changed
-
-        changed, cfg.master = imgui.checkbox("Master Enable", cfg.master)
-
-        imgui.separator()
-        changed, cfg.player_side = imgui.combo("Player Side", cfg.player_side, {"Auto", "P1", "P2"})
-
-        imgui.separator()
-        changed, cfg.enabled = imgui.checkbox("Pulse Button", cfg.enabled)
-        changed, cfg.pulse_btn_idx = imgui.combo("Pulse Which", cfg.pulse_btn_idx, BUTTON_NAMES)
-        changed, cfg.interval_min = imgui.slider_int("Interval Min (f)", cfg.interval_min, 1, 300)
-        changed, cfg.interval_max = imgui.slider_int("Interval Max (f)", cfg.interval_max, 1, 300)
-        if cfg.interval_max < cfg.interval_min then cfg.interval_max = cfg.interval_min end
-        changed, cfg.hold_min = imgui.slider_int("Hold Min (f)", cfg.hold_min, 1, 30)
-        changed, cfg.hold_max = imgui.slider_int("Hold Max (f)", cfg.hold_max, 1, 30)
-        if cfg.hold_max < cfg.hold_min then cfg.hold_max = cfg.hold_min end
-
-        imgui.separator()
-        changed, cfg.hold_enabled = imgui.checkbox("Hold Button", cfg.hold_enabled)
-        changed, cfg.hold_btn_idx = imgui.combo("Hold Which", cfg.hold_btn_idx, BUTTON_NAMES)
-        changed, cfg.hold_forward = imgui.checkbox("Hold Forward", cfg.hold_forward)
-        changed, cfg.hold_back = imgui.checkbox("Hold Back", cfg.hold_back)
-
-        imgui.separator()
-        changed, cfg.debug_log = imgui.checkbox("Debug Log", cfg.debug_log)
-        if imgui.button("Save") then save_cfg() end
-        imgui.same_line()
-        if imgui.button("Load") then
-            local loaded = load_cfg()
-            for k, v in pairs(loaded) do cfg[k] = v end
-        end
-
-        imgui.spacing()
-        local status = in_match and "IN MATCH" or "NO MATCH"
-        local side_str = detected_side and ("P" .. detected_side .. " (auto)") or
-                         cfg.player_side ~= 0 and ("P" .. cfg.player_side) or "..."
-        imgui.text(status .. " | " .. side_str .. " | f" .. frame)
-
-        imgui.tree_pop()
-    end
-end)
+if ui then
+    ui.init({
+        battle = battle,
+        button_names = BUTTON_NAMES,
+    })
+end
 
 log.debug("Modern Bot Ready")
