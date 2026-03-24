@@ -1,50 +1,6 @@
 local module = {}
 
 ---------------------------------------------------------------------------
--- Config
----------------------------------------------------------------------------
-local CFG_PATH = "modern_bot_cfg.json"
-local CFG_DEFAULTS = {
-    master        = true,
-    enabled       = false,
-    debug_log     = false,
-    pulse_btn_idx = 1,
-    interval_min  = 30,
-    interval_max  = 90,
-    hold_min      = 2,
-    hold_max      = 5,
-    hold_enabled  = false,
-    hold_btn_idx  = 1,
-    hold_forward  = false,
-    hold_back     = false,
-    player_side   = 0,
-}
-
-local function make_defaults()
-    local t = {}
-    for k, v in pairs(CFG_DEFAULTS) do t[k] = v end
-    return t
-end
-
-local function load_cfg()
-    local ok, data = pcall(json.load_file, CFG_PATH)
-    if not ok or not data then return make_defaults() end
-    local merged = make_defaults()
-    for k, v in pairs(data) do
-        if CFG_DEFAULTS[k] ~= nil then merged[k] = v end
-    end
-    return merged
-end
-
-local function save_cfg()
-    local data = {}
-    for k, _ in pairs(CFG_DEFAULTS) do data[k] = module.cfg[k] end
-    pcall(json.dump_file, CFG_PATH, data)
-end
-
-module.cfg = load_cfg()
-
----------------------------------------------------------------------------
 -- Colors (ABGR format for imgui)
 ---------------------------------------------------------------------------
 local COL_HEADER    = 0xFF44AAFF  -- orange
@@ -61,12 +17,13 @@ local function section_header(label)
 end
 
 ---------------------------------------------------------------------------
--- Draw
+-- Init (registers the draw callback)
 ---------------------------------------------------------------------------
 function module.init(deps)
+    local cfg = deps.cfg
+    local config = deps.config
     local battle = deps.battle
     local BUTTON_NAMES = deps.button_names
-    local cfg = module.cfg
 
     re.on_draw_ui(function()
         if imgui.tree_node("Modern Bot") then
@@ -105,10 +62,10 @@ function module.init(deps)
             section_header("Settings")
             ---------------------------------------------------------------
             changed, cfg.debug_log = imgui.checkbox("Debug Log", cfg.debug_log)
-            if imgui.button("Save") then save_cfg() end
+            if imgui.button("Save") then config.save() end
             imgui.same_line()
             if imgui.button("Load") then
-                local loaded = load_cfg()
+                local loaded = config.load()
                 for k, v in pairs(loaded) do cfg[k] = v end
             end
 

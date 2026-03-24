@@ -1,8 +1,5 @@
 local module = {}
 
-module.name = "Battle State"
-module.description = "Tracks match state, side detection, and facing direction"
-
 module.data = {
     fbattle       = nil,
     in_match      = false,
@@ -92,14 +89,14 @@ local function check_match()
 end
 
 ---------------------------------------------------------------------------
--- Module lifecycle
+-- Per-frame update
 ---------------------------------------------------------------------------
-function module.init()
-    -- nothing needed at init time
-end
-
-function module.on_frame()
-    -- nothing needed per frame
+function module.on_frame(player_side_cfg)
+    if not check_match() then return end
+    module.data.frame = module.data.frame + 1
+    if not module.data.detected_side then
+        try_detect_side(player_side_cfg)
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -126,16 +123,6 @@ function module.get_facing(player_side_cfg)
         if not ok then return nil end
     end
     return facing_right
-end
-
-function module.update(fbattle_obj, player_side_cfg)
-    module.data.fbattle = fbattle_obj
-    if not check_match() then return end
-    module.data.frame = module.data.frame + 1
-
-    if not module.data.detected_side then
-        try_detect_side(player_side_cfg)
-    end
 end
 
 return module
