@@ -71,7 +71,7 @@ hook_kbd_method("CheckRepeat", false)
 -- Config
 ---------------------------------------------------------------------------
 local CFG_PATH = "modern_bot_cfg.json"
-local cfg_defaults = {
+local CFG_DEFAULTS = {
     master        = true,
     enabled       = false,
     debug_log     = false,
@@ -87,122 +87,36 @@ local cfg_defaults = {
     player_side   = 0,
 }
 
-local function load_cfg()
-    local ok, data = pcall(json.load_file, CFG_PATH)
-    if ok and data then
-        local merged = {}
-        for k, v in pairs(cfg_defaults) do merged[k] = v end
-        for k, v in pairs(data) do
-            if cfg_defaults[k] ~= nil then merged[k] = v end
-        end
-        return merged
-    end
+local function make_defaults()
+    local t = {}
+    for k, v in pairs(CFG_DEFAULTS) do t[k] = v end
+    return t
 end
 
-local cfg = load_cfg() or {}
-for k, v in pairs(cfg_defaults) do
-    if cfg[k] == nil then cfg[k] = v end
+local function load_cfg()
+    local ok, data = pcall(json.load_file, CFG_PATH)
+    if not ok or not data then return make_defaults() end
+    local merged = make_defaults()
+    for k, v in pairs(data) do
+        if CFG_DEFAULTS[k] ~= nil then merged[k] = v end
+    end
+    return merged
 end
+
+local cfg = load_cfg()
 
 local function save_cfg()
     local data = {}
-    for k, _ in pairs(cfg_defaults) do data[k] = cfg[k] end
+    for k, _ in pairs(CFG_DEFAULTS) do data[k] = cfg[k] end
     pcall(json.dump_file, CFG_PATH, data)
 end
 
 ---------------------------------------------------------------------------
--- Match state + auto side detection
----------------------------------------------------------------------------
-local refresh_player_behaviors
-local fbattle = nil
-local in_match = false
-local frame = 0
-local detected_side = nil
-local detect_phase = 0
-
-local function read_player_input(idx)
-    if not fbattle then return nil end
-    local ok, p = pcall(fbattle.call, fbattle, "GetPlayer", idx)
-    if not ok or not p then return nil end
-    local ok2, inp = pcall(p.call, p, "get_InputNew")
-    return ok2 and inp or nil
-end
-
-local function try_detect_side()
-    if cfg.player_side ~= 0 then
-        detected_side = cfg.player_side
-        refresh_player_behaviors()
-        return
-    end
-
-    -- Try getOnlineCpuBattleSelfSideIndex first (works for online + vs CPU)
-    local bf_type = sdk.find_type_definition("app.battle.bBattleFlow")
-    local bf_singleton = bf_type and sdk.get_managed_singleton("app.battle.bBattleFlow")
-    if bf_singleton then
-        local ok, idx = pcall(bf_singleton.call, bf_singleton, "getOnlineCpuBattleSelfSideIndex", false)
-        if ok and idx then
-            detected_side = idx + 1  -- 0-indexed -> 1-indexed
-            refresh_player_behaviors()
-            log.debug("[bot] Detected side via bBattleFlow: P" .. detected_side)
-            return
-        end
-    end
-
-    -- Fallback: probe with S key
-    if detect_phase == 0 then
-        inject_key(VK.S)
-        detect_phase = 1
-    elseif detect_phase == 1 then
-        local p1 = read_player_input(0) or 0
-        local p2 = read_player_input(1) or 0
-        release_all()
-        if (p1 & 0x002) ~= 0 and (p2 & 0x002) == 0 then
-            detected_side = 1
-            refresh_player_behaviors()
-            log.debug("[bot] Detected side via probe: P1")
-        elseif (p2 & 0x002) ~= 0 and (p1 & 0x002) == 0 then
-            detected_side = 2
-            refresh_player_behaviors()
-            log.debug("[bot] Detected side via probe: P2")
-        else
-            detect_phase = 0
-        end
-    end
-end
-
-local function reset_state()
-    release_all()
-    detected_side = nil
-    detect_phase = 0
-end
-
-local function check_match()
-    if not fbattle then
-        if in_match then
-            in_match = false
-            reset_state()
-        end
-        return false
-    end
-    local ok, p = pcall(fbattle.call, fbattle, "GetPlayer", 0)
-    local now = ok and p ~= nil
-    if now and not in_match then
-        in_match = true
-        frame = 0
-        reset_state()
-    elseif not now and in_match then
-        in_match = false
-        reset_state()
-    end
-    return in_match
-end
-
----------------------------------------------------------------------------
--- Facing detection
+-- Facing detection (before match state, since side detection needs it)
 ---------------------------------------------------------------------------
 local player_behaviors = {nil, nil}
 
-refresh_player_behaviors = function()
+local function refresh_player_behaviors()
     player_behaviors = {nil, nil}
     local scene_mgr = sdk.get_native_singleton("via.SceneManager")
     if not scene_mgr then return end
@@ -241,15 +155,77 @@ local function get_facing()
         pb = player_behaviors[idx]
         if not pb then return nil end
     end
-    local ok, mirror = pcall(pb.call, pb, "get_IsMirror")
+    local ok, facing_left = pcall(pb.call, pb, "get_IsMirror")
     if not ok then
         refresh_player_behaviors()
         pb = player_behaviors[idx]
         if not pb then return nil end
-        ok, mirror = pcall(pb.call, pb, "get_IsMirror")
+        ok, facing_left = pcall(pb.call, pb, "get_IsMirror")
         if not ok then return nil end
     end
-    return mirror
+    return facing_left
+end
+
+---------------------------------------------------------------------------
+-- Match state + auto side detection
+---------------------------------------------------------------------------
+local fbattle = nil
+local in_match = false
+local frame = 0
+local detected_side = nil
+local detect_phase = 0
+
+local function read_player_input(idx)
+    if not fbattle then return nil end
+    local ok, p = pcall(fbattle.call, fbattle, "GetPlayer", idx)
+    if not ok or not p then return nil end
+    local ok2, inp = pcall(p.call, p, "get_InputNew")
+    return ok2 and inp or nil
+end
+
+local function try_detect_side()
+    if cfg.player_side ~= 0 then
+        detected_side = cfg.player_side
+        refresh_player_behaviors()
+        return
+    end
+
+    -- Try getOnlineCpuBattleSelfSideIndex first (works for online + vs CPU)
+    local bf_singleton = sdk.get_managed_singleton("app.battle.bBattleFlow")
+    if bf_singleton then
+        local ok, idx = pcall(bf_singleton.call, bf_singleton, "getOnlineCpuBattleSelfSideIndex", false)
+        if ok and idx then
+            detected_side = idx + 1  -- 0-indexed -> 1-indexed
+            refresh_player_behaviors()
+            log.debug("[bot] Detected side via bBattleFlow: P" .. detected_side)
+            return
+        end
+    end
+    
+end
+
+local function reset_state()
+    release_all()
+    detected_side = nil
+    detect_phase = 0
+end
+
+local function check_match()
+    if not fbattle then
+        if in_match then
+            in_match = false
+            reset_state()
+        end
+        return false
+    end
+    local ok, p = pcall(fbattle.call, fbattle, "GetPlayer", 0)
+    local now = ok and p ~= nil
+    if now ~= in_match then
+        in_match = now
+        frame = 0
+        reset_state()
+    end
+    return in_match
 end
 
 ---------------------------------------------------------------------------
@@ -289,33 +265,29 @@ local function apply_holds()
         inject_key(BUTTONS[cfg.hold_btn_idx].vk)
     end
 
-    local mirror = get_facing()
-    if cfg.debug_log and (cfg.hold_forward or cfg.hold_back) and frame % 60 == 1 then
-        log.debug("[bot] side=P" .. get_my_index() .. " mirror=" .. tostring(mirror))
+    if not cfg.hold_forward and not cfg.hold_back then return end
+
+    local facing_left = get_facing()
+
+    if cfg.debug_log and frame % 60 == 1 then
+        log.debug("[bot] side=P" .. get_my_index() .. " facing_left=" .. tostring(facing_left))
     end
 
-    if cfg.hold_forward then
-        if mirror then
-            inject_key(VK.D)
-        else
-            inject_key(VK.A)
-        end
-    end
-    if cfg.hold_back then
-        if mirror then
-            inject_key(VK.A)
-        else
-            inject_key(VK.D)
-        end
-    end
+    -- facing_left=true: forward=D, back=A
+    -- facing_left=false (facing right): forward=A, back=D
+    local fwd_key = facing_left and VK.D or VK.A
+    local back_key = facing_left and VK.A or VK.D
+
+    if cfg.hold_forward then inject_key(fwd_key) end
+    if cfg.hold_back then inject_key(back_key) end
 end
 
 ---------------------------------------------------------------------------
 -- On Frame
 ---------------------------------------------------------------------------
 re.on_frame(function()
-    local mirror = get_facing()
-    log.debug("[bot] mirror=" .. tostring(mirror))
+    local facing_left = get_facing()
+    log.debug("[bot] facing_left=" .. tostring(facing_left))
 end)
 
 ---------------------------------------------------------------------------
@@ -379,7 +351,7 @@ re.on_draw_ui(function()
         imgui.same_line()
         if imgui.button("Load") then
             local loaded = load_cfg()
-            if loaded then for k, v in pairs(loaded) do cfg[k] = v end end
+            for k, v in pairs(loaded) do cfg[k] = v end
         end
 
         imgui.spacing()
