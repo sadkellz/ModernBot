@@ -155,15 +155,15 @@ local function get_facing()
         pb = player_behaviors[idx]
         if not pb then return nil end
     end
-    local ok, facing_left = pcall(pb.call, pb, "get_IsMirror")
+    local ok, facing_right = pcall(pb.call, pb, "get_IsMirror")
     if not ok then
         refresh_player_behaviors()
         pb = player_behaviors[idx]
         if not pb then return nil end
-        ok, facing_left = pcall(pb.call, pb, "get_IsMirror")
+        ok, facing_right = pcall(pb.call, pb, "get_IsMirror")
         if not ok then return nil end
     end
-    return facing_left
+    return facing_right
 end
 
 ---------------------------------------------------------------------------
@@ -267,16 +267,16 @@ local function apply_holds()
 
     if not cfg.hold_forward and not cfg.hold_back then return end
 
-    local facing_left = get_facing()
+    local facing_right = get_facing()
 
     if cfg.debug_log and frame % 60 == 1 then
-        log.debug("[bot] side=P" .. get_my_index() .. " facing_left=" .. tostring(facing_left))
+        log.debug("[bot] side=P" .. get_my_index() .. " facing_right=" .. tostring(facing_right))
     end
 
-    -- facing_left=true: forward=D, back=A
-    -- facing_left=false (facing right): forward=A, back=D
-    local fwd_key = facing_left and VK.D or VK.A
-    local back_key = facing_left and VK.A or VK.D
+    -- facing_right=true: forward=D, back=A
+    -- facing_right=false (facing left): forward=A, back=D
+    local fwd_key = facing_right and VK.D or VK.A
+    local back_key = facing_right and VK.A or VK.D
 
     if cfg.hold_forward then inject_key(fwd_key) end
     if cfg.hold_back then inject_key(back_key) end
@@ -286,8 +286,8 @@ end
 -- On Frame
 ---------------------------------------------------------------------------
 re.on_frame(function()
-    local facing_left = get_facing()
-    log.debug("[bot] facing_left=" .. tostring(facing_left))
+    try_detect_side()
+    log.debug("[bot] detected_side=" .. tostring(detected_side) .. " is_mirror=" .. tostring(get_facing()))
 end)
 
 ---------------------------------------------------------------------------
