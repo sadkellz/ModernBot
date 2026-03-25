@@ -71,7 +71,9 @@ function module.init(deps)
             changed, cfg.move_delay_min = imgui.slider_int("Delay Min (f)", cfg.move_delay_min, 1, 120)
             changed, cfg.move_delay_max = imgui.slider_int("Delay Max (f)", cfg.move_delay_max, 1, 120)
             if cfg.move_delay_max < cfg.move_delay_min then cfg.move_delay_max = cfg.move_delay_min end
-            changed, cfg.move_jump_frames = imgui.slider_int("Jump+Atk (f)", cfg.move_jump_frames, 1, 30)
+            changed, cfg.move_jump_min = imgui.slider_int("Hold Min (f)##move", cfg.move_jump_min, 1, 30)
+            changed, cfg.move_jump_max = imgui.slider_int("Hold Max (f)##move", cfg.move_jump_max, 1, 30)
+            if cfg.move_jump_max < cfg.move_jump_min then cfg.move_jump_max = cfg.move_jump_min end
 
             ---------------------------------------------------------------
             section_header("Settings")

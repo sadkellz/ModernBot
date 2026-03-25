@@ -32,7 +32,7 @@ sdk.hook(
 
         if not cfg.master
             or (battle.data.is_training and not cfg.allow_training)
-            or not battle.data.is_fighting
+            or not battle.data.in_match
             or not battle.data.detected_side
         then
             input.release_all()
@@ -44,6 +44,15 @@ sdk.hook(
         return retval
     end
 )
+
+---------------------------------------------------------------------------
+-- Safety: release all keys when not in an active match
+---------------------------------------------------------------------------
+re.on_frame(function()
+    if not battle.data.in_match or not battle.data.detected_side then
+        input.release_all()
+    end
+end)
 
 ---------------------------------------------------------------------------
 -- Init UI

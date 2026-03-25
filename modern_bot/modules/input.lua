@@ -136,6 +136,7 @@ local move_jump_timer = 0
 local move_delay_target = 0
 local move_current_buttons = nil
 local move_jump_dir = nil  -- nil=neutral, VK.A=left, VK.D=right
+local move_jump_hold = 0   -- randomized hold duration for this jump
 
 local MOVE_OPTIONS = {
     { BUTTONS[1].vk },                    -- Light
@@ -144,7 +145,7 @@ local MOVE_OPTIONS = {
     { BUTTONS[2].vk, BUTTONS[3].vk },     -- Medium + Heavy
 }
 
-local JUMP_DIRS = { nil, VK.A, VK.D }  -- neutral, left, right
+local JUMP_DIRS = { "neutral", "forward", "back" }
 
 local ACTIONABLE_STATES = {
     [1] = true,   -- STAND
@@ -164,17 +165,28 @@ local function tick_move(cfg, battle)
         move_delay_target = 0
         move_current_buttons = nil
         move_jump_dir = nil
+        move_jump_hold = 0
         return
     end
 
     if move_phase == MOVE_PHASE_CHARGE then
-        -- Always hold down while charging
+        -- Hold down-back while charging
         inject_key(VK.S)
-        move_charge_timer = move_charge_timer + 1
+        local facing_right = battle.get_facing()
+        local back_key = facing_right and VK.A or VK.D
+        inject_key(back_key)
 
-        -- Check if actionable AND charged enough
+        -- Only count charge frames while actively fighting
+        if battle.data.is_fighting then
+            move_charge_timer = move_charge_timer + 1
+        end
+
+        -- Check if actionable AND charged enough AND actively fighting
         local act_st = battle.get_act_st()
-        if act_st and ACTIONABLE_STATES[act_st] and move_charge_timer >= cfg.move_charge_min then
+        if battle.data.is_fighting
+            and act_st and ACTIONABLE_STATES[act_st]
+            and move_charge_timer >= cfg.move_charge_min
+        then
             move_ready_timer = move_ready_timer + 1
 
             -- Pick a delay target on first ready frame
@@ -188,6 +200,7 @@ local function tick_move(cfg, battle)
                 move_jump_timer = 0
                 move_current_buttons = MOVE_OPTIONS[math.random(1, #MOVE_OPTIONS)]
                 move_jump_dir = JUMP_DIRS[math.random(1, #JUMP_DIRS)]
+                move_jump_hold = math.random(cfg.move_jump_min, cfg.move_jump_max)
             end
         elseif not (act_st and ACTIONABLE_STATES[act_st]) then
             -- Not actionable: reset ready timer but keep charge timer
@@ -196,17 +209,32 @@ local function tick_move(cfg, battle)
         end
 
     elseif move_phase == MOVE_PHASE_JUMP then
-        -- Jump + attack + random direction
+        -- Abort if no longer fighting
+        if not battle.data.is_fighting then
+            move_phase = MOVE_PHASE_CHARGE
+            move_charge_timer = 0
+            move_ready_timer = 0
+            move_delay_target = 0
+            move_current_buttons = nil
+            move_jump_dir = nil
+            move_jump_hold = 0
+            inject_key(VK.S)  -- resume charging
+            return
+        end
+        -- Jump + attack + direction (all simultaneous)
         move_jump_timer = move_jump_timer + 1
         inject_key(VK.W)
-        if move_jump_dir == VK.A then inject_key(VK.A)
-        elseif move_jump_dir == VK.D then inject_key(VK.D)
+        if move_jump_dir ~= "neutral" then
+            local facing_right = battle.get_facing()
+            local fwd_key = facing_right and VK.D or VK.A
+            local back_key = facing_right and VK.A or VK.D
+            inject_key(move_jump_dir == "forward" and fwd_key or back_key)
         end
         for _, vk in ipairs(move_current_buttons) do
             inject_key(vk)
         end
 
-        if move_jump_timer >= cfg.move_jump_frames then
+        if move_jump_timer >= move_jump_hold then
             -- Back to charging
             move_phase = MOVE_PHASE_CHARGE
             move_charge_timer = 0
@@ -214,6 +242,7 @@ local function tick_move(cfg, battle)
             move_delay_target = 0
             move_current_buttons = nil
             move_jump_dir = nil
+            move_jump_hold = 0
         end
     end
 end
