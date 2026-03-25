@@ -7,6 +7,7 @@ module.data = {
     frame         = 0,
     detected_side = nil,
     game_mode     = nil,
+    fight_st      = nil,
 }
 
 ---------------------------------------------------------------------------
@@ -49,60 +50,30 @@ end
 ---------------------------------------------------------------------------
 -- Side detection
 ---------------------------------------------------------------------------
-local TRAINING_MODES = {
-    [0] = false, -- NONE
-}
-
 local function read_game_mode()
     local setting = get_gBattle_field("Setting")
     if not setting then return nil, false end
     local ok_m, mode = pcall(setting.get_field, setting, "GameMode")
     local ok_o, online = pcall(setting.get_field, setting, "IsOnline")
-    if ok_m then
-        module.data.game_mode = mode
-    end
+    if ok_m then module.data.game_mode = mode end
     return (ok_m and mode or nil), (ok_o and online or false)
 end
 
-local function is_training_mode(mode)
-    if mode == nil then return false end
-    -- Check by name: TRAINING, ONLINE_TRAINING, STORY_TRAINING, TUTORIAL, etc.
-    -- Training modes are always P1
-    local training_modes = {
-        -- These enum values need to be checked at runtime
-    }
-    -- Use string check on the GameMode field name
-    local setting = get_gBattle_field("Setting")
-    if not setting then return false end
-    local ok, mode_val = pcall(setting.get_field, setting, "GameMode")
-    if not ok then return false end
-    -- GameMode is a byte enum; we check the type name via REFramework
-    local mode_type = sdk.find_type_definition("app.EGameMode")
-    if not mode_type then return false end
-    -- Try known training mode check: gBattle.Training is non-nil in training
+local function is_training_mode()
     local training = get_gBattle_field("Training")
     return training ~= nil
 end
 
 local function try_detect_side_online()
-    log.debug("[battle] try_detect_side_online: bBattleFlow_instance=" .. tostring(bBattleFlow_instance))
-    if not bBattleFlow_instance then
-        return nil
-    end
+    if not bBattleFlow_instance then return nil end
 
-    -- Access m_session field
     local ok_s, session = pcall(bBattleFlow_instance.get_field, bBattleFlow_instance, "m_session")
-    log.debug("[battle] m_session: ok=" .. tostring(ok_s) .. " val=" .. tostring(session))
     if not ok_s or not session then return nil end
 
-    -- Access SelfBattleMemberInfo property
     local ok_m, member_info = pcall(session.call, session, "get_SelfBattleMemberInfo")
-    log.debug("[battle] SelfBattleMemberInfo: ok=" .. tostring(ok_m) .. " val=" .. tostring(member_info))
     if not ok_m or not member_info then return nil end
 
-    -- Read MemberIndex field
     local ok_i, idx = pcall(member_info.get_field, member_info, "MemberIndex")
-    log.debug("[battle] MemberIndex: ok=" .. tostring(ok_i) .. " val=" .. tostring(idx))
     if not ok_i then return nil end
 
     return idx  -- 0 = P1 side, 1 = P2 side
@@ -122,7 +93,7 @@ local function try_detect_side(player_side_cfg)
     -- Training/local modes: always P1
     if not online then
         module.data.detected_side = 1
-        module.data.is_training = is_training_mode(mode)
+        module.data.is_training = is_training_mode()
         log.debug("[battle] Local mode, defaulting to P1 (training=" .. tostring(module.data.is_training) .. ")")
         return
     end
@@ -145,7 +116,27 @@ local function reset()
     module.data.is_fighting = false
     module.data.is_training = false
     module.data.game_mode = nil
+    module.data.fight_st = nil
+    bBattleFlow_instance = nil
 end
+
+-- Periodic check for match exit (confirmBattleInput stops firing outside matches)
+re.on_frame(function()
+    if not module.data.in_match then return end
+    local flow = get_gBattle_field("Flow")
+    if not flow then
+        module.data.in_match = false
+        reset()
+        log.debug("[battle] Match ended (flow gone)")
+        return
+    end
+    local ok, ended = pcall(flow.call, flow, "IsBattleEnd")
+    if ok and ended then
+        module.data.in_match = false
+        reset()
+        log.debug("[battle] Match ended (IsBattleEnd)")
+    end
+end)
 
 local function update_match_state()
     local flow = get_gBattle_field("Flow")
@@ -165,12 +156,23 @@ local function update_match_state()
         reset()
     end
 
-    -- Check if actively fighting (round timer ticking)
+    -- Check fight phase
     if module.data.in_match then
-        local round = get_gBattle_field("Round")
-        if round then
-            local ok2, active = pcall(round.call, round, "TimerWorking")
-            module.data.is_fighting = ok2 and active or false
+        local game = get_gBattle_field("Game")
+        if game then
+            local ok2, st = pcall(game.call, game, "get_FightST")
+            local prev_st = module.data.fight_st
+            module.data.fight_st = ok2 and st or nil
+            module.data.is_fighting = ok2 and st == 4 or false  -- FIGHT_ST.NOW = 4
+
+            -- New match detected (STAGE_INIT): re-detect side
+            if ok2 and st == 0 and prev_st ~= 0 then
+                module.data.detected_side = nil
+                module.data.is_training = false
+                module.data.game_mode = nil
+                bBattleFlow_instance = nil
+                log.debug("[battle] New match detected (STAGE_INIT), resetting side")
+            end
         end
     end
 
@@ -192,8 +194,9 @@ function module.on_frame(cfg)
         local side = module.data.detected_side
         local facing = module.get_facing()
         local facing_str = facing == true and "right" or facing == false and "left" or "?"
-        log.debug(string.format("[battle] P%s facing_%s f%d training=%s",
+        log.debug(string.format("[battle] P%s facing_%s f%d fighting=%s training=%s",
             side or "?", facing_str, module.data.frame,
+            tostring(module.data.is_fighting),
             tostring(module.data.is_training)))
     end
 end

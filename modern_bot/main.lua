@@ -30,8 +30,12 @@ sdk.hook(
     function(retval)
         battle.on_frame(cfg)
 
-        if not cfg.master then input.release_all() return retval end
-        if not battle.data.is_fighting or not battle.data.detected_side then
+        if not cfg.master
+            or battle.data.is_training
+            or not battle.data.is_fighting
+            or not battle.data.detected_side
+        then
+            input.release_all()
             return retval
         end
 
