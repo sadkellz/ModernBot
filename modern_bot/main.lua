@@ -46,9 +46,33 @@ sdk.hook(
 )
 
 ---------------------------------------------------------------------------
--- Safety: release all keys when not in an active match
+-- Safety: check gBattle.Flow directly to detect match end
+-- (confirmBattleInput hook stops firing after match, so battle.data goes stale)
 ---------------------------------------------------------------------------
 re.on_frame(function()
+    -- Check fight_st directly from gBattle.Game every frame
+    local game = battle.get_game()
+    if game then
+        local ok, st = pcall(game.call, game, "get_FightST")
+        if ok and st then
+            battle.data.fight_st = st
+            battle.data.is_fighting = (st == 4)
+            -- FINISH(5), WIN_WAIT(6), WIN(7), NUM(8) = match ending
+            if st >= 5 then
+                battle.data.in_match = false
+                input.release_all()
+                return
+            end
+        end
+    else
+        -- No game object = not in a match at all
+        if battle.data.in_match then
+            battle.data.in_match = false
+            battle.data.is_fighting = false
+            battle.data.fight_st = nil
+        end
+    end
+
     if not battle.data.in_match or not battle.data.detected_side then
         input.release_all()
     end

@@ -248,4 +248,14 @@ function module.get_act_st_name()
     return ACT_ST_NAMES[st] or tostring(st)
 end
 
+--- Returns the gBattle.Flow object, or nil if not in battle.
+function module.get_flow()
+    return get_gBattle_field("Flow")
+end
+
+--- Returns the gBattle.Game object, or nil.
+function module.get_game()
+    return get_gBattle_field("Game")
+end
+
 return module
