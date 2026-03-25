@@ -194,8 +194,9 @@ function module.on_frame(cfg)
         local side = module.data.detected_side
         local facing = module.get_facing()
         local facing_str = facing == true and "right" or facing == false and "left" or "?"
-        log.debug(string.format("[battle] P%s facing_%s f%d fighting=%s training=%s",
-            side or "?", facing_str, module.data.frame,
+        local act = module.get_act_st_name()
+        log.debug(string.format("[battle] P%s facing_%s act=%s f%d fighting=%s training=%s",
+            side or "?", facing_str, act, module.data.frame,
             tostring(module.data.is_fighting),
             tostring(module.data.is_training)))
     end
@@ -216,6 +217,35 @@ function module.get_facing()
     local ok, rl_dir = pcall(p.get_field, p, "rl_dir")
     if not ok then return nil end
     return rl_dir
+end
+
+--- ACT_ST.ID enum names for logging
+local ACT_ST_NAMES = {
+    [0] = "NONE", "STAND", "STAND_TURN", "SIT", "SIT_TURN", "SITD",
+    "WALK", "DUCK_WALK", "FOOTWORK", "DASH", "KDASH",
+    "JUMP", "JUMP_NORM", "JUMP_RET", "JUMP_LAND",
+    "SJUMP", "SJUMP_NORM", "SJUMP_RET", "SJUMP_DMG",
+    "WJUMP", "WSJUMP", "TJUMP",
+    "ATCK", "ATCK_LAND", "DEF", "JDEF", "PARRY",
+    "CATCH", "NOKI", "NIJI", "HOLD",
+    "DAMAGE", "FALL", "GETUP", "UKEMI", "SLEEP",
+    "FLYING", "SPECIAL", "SUPER", "TOUCH", "WITHDRAW", "WIN",
+}
+
+--- Returns the act_st value for our player, or nil.
+function module.get_act_st()
+    local idx = module.get_my_index()
+    local p = get_player(idx - 1)
+    if not p then return nil end
+    local ok, st = pcall(p.get_field, p, "act_st")
+    return ok and st or nil
+end
+
+--- Returns the act_st name string, or "?" if unknown.
+function module.get_act_st_name()
+    local st = module.get_act_st()
+    if st == nil then return "?" end
+    return ACT_ST_NAMES[st] or tostring(st)
 end
 
 return module

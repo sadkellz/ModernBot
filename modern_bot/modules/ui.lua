@@ -31,6 +31,7 @@ function module.init(deps)
 
             -- Master
             changed, cfg.master = imgui.checkbox("Master Enable", cfg.master)
+            changed, cfg.allow_training = imgui.checkbox("Allow in Training", cfg.allow_training)
 
             ---------------------------------------------------------------
             section_header("Player")
@@ -60,6 +61,17 @@ function module.init(deps)
             changed, cfg.hold_forward = imgui.checkbox("Forward", cfg.hold_forward)
             imgui.same_line()
             changed, cfg.hold_back = imgui.checkbox("Back", cfg.hold_back)
+
+            ---------------------------------------------------------------
+            section_header("Move")
+            ---------------------------------------------------------------
+            changed, cfg.move_enabled = imgui.checkbox("Enable##move", cfg.move_enabled)
+            imgui.text("Charge down, then random: L / M / H / M+H")
+            changed, cfg.move_charge_min = imgui.slider_int("Min Charge (f)", cfg.move_charge_min, 1, 120)
+            changed, cfg.move_delay_min = imgui.slider_int("Delay Min (f)", cfg.move_delay_min, 1, 120)
+            changed, cfg.move_delay_max = imgui.slider_int("Delay Max (f)", cfg.move_delay_max, 1, 120)
+            if cfg.move_delay_max < cfg.move_delay_min then cfg.move_delay_max = cfg.move_delay_min end
+            changed, cfg.move_jump_frames = imgui.slider_int("Jump+Atk (f)", cfg.move_jump_frames, 1, 30)
 
             ---------------------------------------------------------------
             section_header("Settings")

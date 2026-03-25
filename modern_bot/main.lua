@@ -31,7 +31,7 @@ sdk.hook(
         battle.on_frame(cfg)
 
         if not cfg.master
-            or battle.data.is_training
+            or (battle.data.is_training and not cfg.allow_training)
             or not battle.data.is_fighting
             or not battle.data.detected_side
         then

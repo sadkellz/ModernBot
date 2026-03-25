@@ -15,6 +15,12 @@ local DEFAULTS = {
     hold_btn_idx  = 1,
     hold_forward  = false,
     hold_back     = false,
+    move_enabled  = false,
+    move_charge_min    = 45,
+    move_delay_min     = 10,
+    move_delay_max     = 45,
+    move_jump_frames   = 3,
+    allow_training = false,
     player_side   = 0,  -- 0=Auto, 1=P1, 2=P2
 }
 
