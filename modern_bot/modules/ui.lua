@@ -42,7 +42,7 @@ function module.init(deps)
             if changed then cfg.player_side = side_combo - 1 end
 
             ---------------------------------------------------------------
-            section_header("Pulse")
+            section_header("Pulse Input")
             ---------------------------------------------------------------
             changed, cfg.enabled = imgui.checkbox("Enable##pulse", cfg.enabled)
             changed, cfg.pulse_btn_idx = imgui.combo("Button##pulse", cfg.pulse_btn_idx, BUTTON_NAMES)
@@ -54,7 +54,7 @@ function module.init(deps)
             if cfg.hold_max < cfg.hold_min then cfg.hold_max = cfg.hold_min end
 
             ---------------------------------------------------------------
-            section_header("Hold")
+            section_header("Hold Input")
             ---------------------------------------------------------------
             changed, cfg.hold_enabled = imgui.checkbox("Enable##hold", cfg.hold_enabled)
             changed, cfg.hold_btn_idx = imgui.combo("Button##hold", cfg.hold_btn_idx, BUTTON_NAMES)
@@ -63,7 +63,7 @@ function module.init(deps)
             changed, cfg.hold_back = imgui.checkbox("Back", cfg.hold_back)
 
             ---------------------------------------------------------------
-            section_header("Move")
+            section_header("Charge Input")
             ---------------------------------------------------------------
             changed, cfg.move_enabled = imgui.checkbox("Enable##move", cfg.move_enabled)
             imgui.text("Charge down, then random: L / M / H / M+H")
@@ -74,6 +74,11 @@ function module.init(deps)
             changed, cfg.move_jump_min = imgui.slider_int("Hold Min (f)##move", cfg.move_jump_min, 1, 30)
             changed, cfg.move_jump_max = imgui.slider_int("Hold Max (f)##move", cfg.move_jump_max, 1, 30)
             if cfg.move_jump_max < cfg.move_jump_min then cfg.move_jump_max = cfg.move_jump_min end
+
+            ---------------------------------------------------------------
+            section_header("Auto Rematch")
+            ---------------------------------------------------------------
+            changed, cfg.auto_rematch = imgui.checkbox("Enable##rematch", cfg.auto_rematch)
 
             ---------------------------------------------------------------
             section_header("Settings")

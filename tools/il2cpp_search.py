@@ -8,6 +8,7 @@ Commands:
     type <name>           Show full type info (fields, methods, properties, parent)
     field <name>          Search for fields by name across all types
     method <name>         Search for methods by name across all types
+    enum <name>           Show enum values (name -> numeric value)
     parent <name>         Show the parent/inheritance chain for a type
     children <name>       Find types that inherit from the given type
     has-field <name>      Find types that have a field with the given name
@@ -136,6 +137,44 @@ def cmd_method(args):
         print(f"No methods matching '{args.query}'")
 
 
+def cmd_enum(args):
+    data = load_dump()
+    found = 0
+    for type_name, info in data.items():
+        if not match(args.query, type_name, args.exact):
+            continue
+        parent = info.get("parent", "")
+        if parent != "System.Enum":
+            continue
+        found += 1
+        print(f"\n{'='*70}")
+        print(f"Enum: {type_name}")
+        backing = info.get("fields", {}).get("value__", {})
+        print(f"  Backing type: {backing.get('type', '?')}")
+
+        entries = []
+        for fname, fdata in info.get("fields", {}).items():
+            if fname == "value__":
+                continue
+            flags = fdata.get("flags", "")
+            if "Literal" not in flags:
+                continue
+            val = fdata.get("default")
+            if val is None:
+                val = fdata.get("init_data_index", "?")
+            entries.append((val, fname))
+
+        entries.sort(key=lambda x: x[0] if isinstance(x[0], (int, float)) else 0)
+        for val, name in entries:
+            print(f"    {val:>6}  {name}")
+
+        if found >= args.limit:
+            print(f"\n... (limited to {args.limit} results)")
+            break
+    if found == 0:
+        print(f"No enums matching '{args.query}'")
+
+
 def cmd_parent(args):
     data = load_dump()
     for type_name, info in data.items():
@@ -239,6 +278,9 @@ def main():
     p = sub.add_parser("method", help="Search methods by name")
     p.add_argument("query")
 
+    p = sub.add_parser("enum", help="Show enum values")
+    p.add_argument("query")
+
     p = sub.add_parser("parent", help="Show inheritance chain")
     p.add_argument("query")
 
@@ -265,6 +307,7 @@ def main():
         "type": cmd_type,
         "field": cmd_field,
         "method": cmd_method,
+        "enum": cmd_enum,
         "parent": cmd_parent,
         "children": cmd_children,
         "has-field": cmd_has_field,

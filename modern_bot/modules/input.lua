@@ -4,7 +4,7 @@ local module = {}
 -- VK codes & button definitions
 ---------------------------------------------------------------------------
 local VK = {
-    W = 87, A = 65, S = 83, D = 68,
+    W = 87, A = 65, S = 83, D = 68, F = 70,
     U = 85, I = 73, O = 79,
     J = 74, K = 75, L = 76,
 }
@@ -33,7 +33,9 @@ local prev_injected_vk = {}
 local function inject_key(vk)  injected_vk[vk] = true end
 local function release_all()   injected_vk = {} end
 
+module.inject_key = inject_key
 module.release_all = release_all
+module.VK = VK
 
 ---------------------------------------------------------------------------
 -- Hook CheckDown/CheckTrigger/CheckRepeat on app.InputDeviceStateKeyboard

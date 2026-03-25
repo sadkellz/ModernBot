@@ -59,9 +59,21 @@ local function read_game_mode()
     return (ok_m and mode or nil), (ok_o and online or false)
 end
 
+-- EGameMode enum values (from il2cpp dump)
+local EGAMEMODE = {
+    TRAINING         = 2,
+    ONLINE_TRAINING  = 18,
+    STORY_TRAINING   = 10,
+}
+
+local TRAINING_MODES = {
+    [EGAMEMODE.TRAINING]        = true,
+    [EGAMEMODE.ONLINE_TRAINING] = true,
+    [EGAMEMODE.STORY_TRAINING]  = true,
+}
+
 local function is_training_mode()
-    local training = get_gBattle_field("Training")
-    return training ~= nil
+    return TRAINING_MODES[module.data.game_mode] or false
 end
 
 local function try_detect_side_online()
@@ -88,13 +100,14 @@ local function try_detect_side(player_side_cfg)
     end
 
     local mode, online = read_game_mode()
-    log.debug(string.format("[battle] GameMode=%s IsOnline=%s", tostring(mode), tostring(online)))
+    module.data.game_mode = mode
 
     -- Training/local modes: always P1
     if not online then
         module.data.detected_side = 1
         module.data.is_training = is_training_mode()
-        log.debug("[battle] Local mode, defaulting to P1 (training=" .. tostring(module.data.is_training) .. ")")
+        log.debug(string.format("[battle] Side=P1 (local, mode=%s, training=%s)",
+            tostring(mode), tostring(module.data.is_training)))
         return
     end
 
@@ -102,9 +115,7 @@ local function try_detect_side(player_side_cfg)
     local side = try_detect_side_online()
     if side ~= nil then
         module.data.detected_side = side + 1  -- 0-indexed -> 1-indexed
-        log.debug("[battle] Detected online side: P" .. module.data.detected_side)
-    else
-        log.debug("[battle] Online side detection failed, will retry")
+        log.debug("[battle] Side=P" .. module.data.detected_side .. " (online)")
     end
 end
 
@@ -126,15 +137,15 @@ re.on_frame(function()
     local flow = get_gBattle_field("Flow")
     if not flow then
         module.data.in_match = false
-        reset()
-        log.debug("[battle] Match ended (flow gone)")
+        module.data.is_fighting = false
+        module.data.fight_st = nil
         return
     end
     local ok, ended = pcall(flow.call, flow, "IsBattleEnd")
     if ok and ended then
         module.data.in_match = false
-        reset()
-        log.debug("[battle] Match ended (IsBattleEnd)")
+        module.data.is_fighting = false
+        module.data.fight_st = nil
     end
 end)
 
@@ -150,10 +161,15 @@ local function update_match_state()
 
     local ok, ended = pcall(flow.call, flow, "IsBattleEnd")
     local now = ok and not ended
-    if now ~= module.data.in_match then
-        module.data.in_match = now
+    if now and not module.data.in_match then
+        -- Entering match
+        module.data.in_match = true
         module.data.frame = 0
-        reset()
+    elseif not now and module.data.in_match then
+        -- Leaving match (don't reset detected_side here, STAGE_INIT handles that)
+        module.data.in_match = false
+        module.data.is_fighting = false
+        module.data.fight_st = nil
     end
 
     -- Check fight phase
