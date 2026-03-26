@@ -178,8 +178,9 @@ local function tick_move(cfg, battle)
         local back_key = facing_right and VK.A or VK.D
         inject_key(back_key)
 
-        -- Only count charge frames while actively fighting
-        if battle.data.is_fighting then
+        -- Count charge frames during READY (3) and FIGHT (4)
+        local st = battle.data.fight_st
+        if st and st >= 3 and st <= 4 then
             move_charge_timer = move_charge_timer + 1
         end
 

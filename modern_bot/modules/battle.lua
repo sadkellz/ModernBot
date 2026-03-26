@@ -274,4 +274,9 @@ function module.get_game()
     return get_gBattle_field("Game")
 end
 
+--- Returns the captured bBattleFlow instance, or nil.
+function module.get_bBattleFlow_instance()
+    return bBattleFlow_instance
+end
+
 return module
