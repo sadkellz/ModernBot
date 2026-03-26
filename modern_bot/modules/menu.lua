@@ -1,29 +1,35 @@
 ---------------------------------------------------------------------------
 -- Menu module: auto-rematch & return to previous mode
--- Injects UI confirm via InputLayer.GetFlags hook
+--
+-- Hooks ResultController to detect result screens.
+-- Injects UI confirm via InputLayer.GetFlags when menu is ready.
+--
+-- States:
+--   idle       → nothing happening
+--   waiting    → result screen active, waiting for menu to become interactable
+--   confirming → injecting UIDecide to press the selected option
+--   rematch_sent → rematch confirmed, waiting for opponent or match to load
 ---------------------------------------------------------------------------
 local module = {}
-module.data = { state = "idle" }  -- idle | waiting | confirming | rematch_sent | returning
-
----------------------------------------------------------------------------
--- Config
----------------------------------------------------------------------------
-local REMATCH_DELAY       = 120  -- frames before confirming rematch
-local RETURN_DELAY        = 60   -- frames before confirming return
-local RETURN_INTERVAL     = 30   -- frames between return retries
-local MAX_RETURN_ATTEMPTS = 20   -- ~10 seconds
+module.data = { state = "idle" }
 
 ---------------------------------------------------------------------------
 -- UI input injection via InputLayer.GetFlags
--- This is the single choke point for all UI digital input checks.
--- The chain: UIAgentManager.UpdateInput -> UIAgent.UpdateInput ->
---   UIInputBindings.UpdateDigital -> UIInputDigitalBindings.UpdateInput ->
+--
+-- Input chain: UIAgentManager.UpdateInput → UIAgent.UpdateInput →
+--   UIInputBindings.UpdateDigital → UIInputDigitalBindings.UpdateInput →
 --   InputLayer.GetFlags(digitalId, playerIndex)
--- We intercept GetFlags and return Down|Trigger when we want to "press" a button.
+--
+-- We intercept GetFlags on the base InputLayer class and return
+-- Down|Trigger flags when we want to simulate a button press.
 ---------------------------------------------------------------------------
-local UI_DECIDE = nil  -- resolved at init
-local injected_ui = {}       -- digitalId -> true
-local prev_injected_ui = {}  -- for trigger detection
+local UI_DECIDE = nil
+local injected_ui = {}
+local prev_injected_ui = {}
+
+local FLAG_DOWN         = 1
+local FLAG_TRIGGER      = 2
+local FLAG_DOWN_TRIGGER = 3
 
 local function inject_ui(id)  injected_ui[id] = true end
 local function release_ui()
@@ -31,40 +37,26 @@ local function release_ui()
     injected_ui = {}
 end
 
--- InputDigitalFlag values
-local FLAG_DOWN    = 1
-local FLAG_TRIGGER = 2
-local FLAG_DOWN_TRIGGER = 3  -- Down | Trigger
-
 do
-    -- Resolve UIDecide enum value
     local dt = sdk.find_type_definition("app.InputAssign.Digital.Id")
     if dt then
         local f = dt:get_field("UIDecide")
         if f then UI_DECIDE = f:get_data() end
     end
-    log.debug("[menu] UI_DECIDE=" .. tostring(UI_DECIDE))
 
-    -- Hook InputLayer.GetFlags (base class) — UIDecide flows through here
     local il_type = sdk.find_type_definition("app.InputLayer")
     if il_type then
         local m = il_type:get_method("GetFlags")
         if m then
-            local cur_digital_id = nil
+            local cur_id = nil
             sdk.hook(m,
                 function(args)
-                    if args[3] then
-                        cur_digital_id = sdk.to_int64(args[3]) & 0xFFFFFFFF
-                    else
-                        cur_digital_id = nil
-                    end
+                    cur_id = args[3] and (sdk.to_int64(args[3]) & 0xFFFFFFFF) or nil
                 end,
                 function(retval)
-                    if module.data.state ~= "confirming" then
-                        return retval
-                    end
-                    if cur_digital_id and injected_ui[cur_digital_id] then
-                        if prev_injected_ui[cur_digital_id] then
+                    if module.data.state ~= "confirming" then return retval end
+                    if cur_id and injected_ui[cur_id] then
+                        if prev_injected_ui[cur_id] then
                             return sdk.to_ptr(FLAG_DOWN)
                         end
                         return sdk.to_ptr(FLAG_DOWN_TRIGGER)
@@ -72,13 +64,22 @@ do
                     return retval
                 end
             )
-            log.debug("[menu] Hooked InputLayer.GetFlags")
         end
     end
 end
 
 ---------------------------------------------------------------------------
--- Scene utilities
+-- ResultMenuType values where rematch IS available
+---------------------------------------------------------------------------
+local MENU_HAS_REMATCH = {
+    [0] = true,  -- Versus
+    [2] = true,  -- Versus_RankDiffer
+    [3] = true,  -- Matching_Continue
+    [4] = true,  -- Matching
+}
+
+---------------------------------------------------------------------------
+-- Scene utility
 ---------------------------------------------------------------------------
 local function find_component_in_scene(type_name)
     local scene_mgr = sdk.get_native_singleton("via.SceneManager")
@@ -104,36 +105,51 @@ end
 -- Internal state
 ---------------------------------------------------------------------------
 local result_controller = nil
-local return_attempts = 0
-local intent = nil  -- "rematch" or "return"
+local intent = nil            -- "rematch" | "return"
+local confirm_frames = 0      -- frame counter for confirming state
 
 local function reset()
     module.data.state = "idle"
-    return_attempts = 0
     result_controller = nil
     intent = nil
+    confirm_frames = 0
     release_ui()
 end
 
+--- Read mStateCurrent from the result controller, or nil.
+local function get_rc_state()
+    if not result_controller then return nil end
+    local ok, st = pcall(result_controller.get_field, result_controller, "mStateCurrent")
+    return ok and st or nil
+end
+
+--- Read the MenuType for our side from the result controller, or nil.
+local function get_menu_type(battle)
+    if not result_controller then return nil end
+    local side_idx = (battle.data.detected_side or 1) - 1
+    local ok, list = pcall(result_controller.call, result_controller,
+        "GetResultMenuListData", side_idx)
+    if not ok or not list then return nil end
+    local ok2, mt = pcall(list.get_field, list, "MenuType")
+    return ok2 and mt or nil
+end
+
 ---------------------------------------------------------------------------
--- Detect result screen on script load (for script reload support)
+-- Detect result screen on script load (for reload support)
 ---------------------------------------------------------------------------
 function module.detect_on_load()
     local rc = find_component_in_scene("app.ResultController")
     if not rc then return false, nil end
 
     local ok, st = pcall(rc.get_field, rc, "mStateCurrent")
-    if not ok then return false, nil end
-
-    if st and st >= 2 then
-        log.debug("[menu] Detected result screen on load (state=" .. tostring(st) .. ")")
+    if ok and st and st >= 2 then
         return true, rc
     end
     return false, nil
 end
 
 ---------------------------------------------------------------------------
--- Init
+-- Init: hooks + per-frame logic
 ---------------------------------------------------------------------------
 function module.init(deps)
     local cfg       = deps.cfg
@@ -156,11 +172,11 @@ function module.init(deps)
         input.release_all()
         if cfg.master and (cfg.auto_rematch or cfg.auto_return) then
             module.data.state = "waiting"
-            log.debug("[menu] Resuming on result screen, waiting for menu")
+            log.debug("[menu] Resuming on result screen")
         end
     end
 
-    -- Hook: result screen appears
+    -- Result screen appears
     local m = rc_type:get_method("Activate")
     if m then
         sdk.hook(m,
@@ -173,25 +189,22 @@ function module.init(deps)
                 if not (cfg.master and (cfg.auto_rematch or cfg.auto_return)) then return end
 
                 module.data.state = "waiting"
-                -- Intent decided when menu is ready (we check MenuType then)
                 intent = nil
                 log.debug("[menu] Result screen, waiting for menu")
             end,
             function(retval) return retval end
         )
-        log.debug("[menu] Hooked ResultController.Activate")
     end
 
-    -- Hook: result screen closes
+    -- Result screen closes
     m = rc_type:get_method("Deactivate")
     if m then
         sdk.hook(m,
             function(args)
                 if module.data.state == "rematch_sent" then
-                    log.debug("[menu] Rematch accepted, match loading")
+                    log.debug("[menu] Rematch accepted")
                     reset()
                 elseif module.data.state ~= "idle" then
-                    log.debug("[menu] Result screen closed")
                     reset()
                     set_state("idle")
                 end
@@ -200,7 +213,7 @@ function module.init(deps)
         )
     end
 
-    -- Hook: opponent declined rematch (menu reappears)
+    -- Opponent declined rematch (menu reappears with new options)
     m = rc_type:get_method("ReactivateMenu")
     if m then
         sdk.hook(m,
@@ -208,7 +221,6 @@ function module.init(deps)
                 if module.data.state == "rematch_sent" and cfg.auto_return and cfg.master then
                     module.data.state = "waiting"
                     intent = "return"
-                    return_attempts = 0
                     log.debug("[menu] Opponent declined, will return when menu ready")
                 end
             end,
@@ -218,7 +230,7 @@ function module.init(deps)
 
     -- Per-frame logic
     re.on_frame(function()
-        -- Reset if we left the result state
+        -- Reset if main state machine left the result screen
         if bot_state.current ~= "result" and module.data.state ~= "idle" then
             reset()
             return
@@ -229,26 +241,16 @@ function module.init(deps)
             return
         end
 
-        -- Check if result menu is ready for input by reading mStateCurrent
-        -- Result (4) = menu visible and interactable
+        ---------------------------------------------------------------
+        -- WAITING: poll mStateCurrent until menu is interactable
+        ---------------------------------------------------------------
         if module.data.state == "waiting" then
-            if not result_controller then
-                reset()
-                return
-            end
-            local ok, st = pcall(result_controller.get_field, result_controller, "mStateCurrent")
-            if not ok or not st then
-                release_ui()
-                return
-            end
+            if not result_controller then reset() return end
 
-            -- Debug: log state transitions while waiting
-            return_attempts = (return_attempts or 0) + 1
-            if return_attempts % 60 == 1 then
-                log.debug("[menu] Waiting: state=" .. tostring(st))
-            end
+            local st = get_rc_state()
+            if not st then release_ui() return end
 
-            -- Skip pre-menu animations (KO replay, win pose) with ESC
+            -- Skip pre-menu animations with ESC
             if st < 7 then
                 if cfg.auto_skip and (st == 0 or st == 3) then
                     input.inject_key(input.VK.ESCAPE)
@@ -257,67 +259,65 @@ function module.init(deps)
                 return
             end
 
-            -- Menu is ready — decide intent based on MenuType
+            -- Menu is ready (state >= 7) — decide what to do
             if not intent then
-                local MENU_HAS_REMATCH = { [0] = true, [2] = true, [3] = true, [4] = true }
-                local side_idx = (battle.data.detected_side or 1) - 1
-                local ok_list, list = pcall(result_controller.call, result_controller,
-                    "GetResultMenuListData", side_idx)
-                local menu_type = nil
-                if ok_list and list then
-                    local ok_mt, mt = pcall(list.get_field, list, "MenuType")
-                    if ok_mt then menu_type = mt end
-                end
-                log.debug("[menu] Menu ready (state=" .. tostring(st) .. ", MenuType=" .. tostring(menu_type) .. ")")
-
-                if menu_type and MENU_HAS_REMATCH[menu_type] and cfg.auto_rematch then
+                local mt = get_menu_type(battle)
+                if mt and MENU_HAS_REMATCH[mt] and cfg.auto_rematch then
                     intent = "rematch"
                 elseif cfg.auto_return then
                     intent = "return"
                 else
-                    log.debug("[menu] No matching action configured")
+                    log.debug("[menu] No action configured (MenuType=" .. tostring(mt) .. ")")
                     reset()
                     return
                 end
-                log.debug("[menu] Intent: " .. intent)
+                log.debug("[menu] Menu ready (state=" .. st .. " MenuType=" .. tostring(mt) .. ") intent=" .. intent)
             end
 
+            -- Begin confirming
             if UI_DECIDE then
                 module.data.state = "confirming"
-                return_attempts = 0
+                confirm_frames = 0
             else
-                log.debug("[menu] No UI_DECIDE resolved")
                 reset()
             end
 
-        -- Confirming: inject UIDecide for several frames with trigger cycling
+        ---------------------------------------------------------------
+        -- CONFIRMING: inject UIDecide with trigger cycling
+        ---------------------------------------------------------------
         elseif module.data.state == "confirming" then
-            return_attempts = return_attempts + 1
-            if return_attempts % 3 == 1 then
+            confirm_frames = confirm_frames + 1
+
+            -- Cycle: press → hold → release (3-frame pattern for trigger detection)
+            local phase = confirm_frames % 3
+            if phase == 1 then
                 release_ui()
                 inject_ui(UI_DECIDE)
-            elseif return_attempts % 3 == 2 then
-                -- keep held (Down only, no fresh Trigger)
+            elseif phase == 2 then
+                -- held (Down only)
             else
                 release_ui()
             end
-            if return_attempts >= 30 then
+
+            -- After enough frames, check result
+            if confirm_frames >= 30 then
                 release_ui()
                 if intent == "rematch" then
                     module.data.state = "rematch_sent"
                     log.debug("[menu] Rematch confirmed, waiting for opponent")
                 else
-                    -- Return: go back to waiting and retry if menu is still there
+                    -- Retry return if menu is still there
                     module.data.state = "waiting"
-                    return_attempts = 0
-                    log.debug("[menu] Return attempt done, rechecking menu")
+                    confirm_frames = 0
+                    log.debug("[menu] Return attempt done, rechecking")
                 end
             end
 
+        ---------------------------------------------------------------
+        -- REMATCH_SENT: just release UI inputs and wait
+        ---------------------------------------------------------------
         elseif module.data.state == "rematch_sent" then
             release_ui()
-
-        -- returning is now handled via waiting -> confirming flow
         end
     end)
 end
