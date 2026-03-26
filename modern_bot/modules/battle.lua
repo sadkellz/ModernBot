@@ -6,6 +6,8 @@ module.data = {
     detected_side = nil,
     game_mode     = nil,
     fight_st      = nil,
+    wins          = 0,
+    losses        = 0,
 }
 
 ---------------------------------------------------------------------------
@@ -184,6 +186,25 @@ function module.get_act_st_name()
     local st = module.get_act_st()
     if st == nil then return "?" end
     return ACT_ST_NAMES[st] or tostring(st)
+end
+
+--- Check round result and update win/loss counters.
+--- Call once when fight_st transitions to FINISH.
+function module.check_round_result()
+    local judge = get_gBattle_field("Judge")
+    if not judge then return end
+
+    local ok, winner = pcall(judge.call, judge, "get_WinTeam")
+    if not ok or winner == nil then return end
+
+    local my_team = (module.data.detected_side or 1) - 1  -- 0-indexed
+    if winner == my_team then
+        module.data.wins = module.data.wins + 1
+        log.debug("[battle] Round won! (" .. module.data.wins .. "W / " .. module.data.losses .. "L)")
+    elseif winner >= 0 then
+        module.data.losses = module.data.losses + 1
+        log.debug("[battle] Round lost. (" .. module.data.wins .. "W / " .. module.data.losses .. "L)")
+    end
 end
 
 --- Returns the gBattle.Flow object, or nil if not in battle.

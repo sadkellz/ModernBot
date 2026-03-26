@@ -109,6 +109,11 @@ function module.init(deps)
             if section("Settings") then
             ---------------------------------------------------------------
                 changed, cfg.debug_log = imgui.checkbox("Debug Log", cfg.debug_log)
+                if imgui.button("Reset Stats") then
+                    battle.data.wins = 0
+                    battle.data.losses = 0
+                end
+                imgui.same_line()
                 if imgui.button("Save") then config.save() end
                 imgui.same_line()
                 if imgui.button("Load") then
@@ -143,6 +148,33 @@ function module.init(deps)
             imgui.pop_style_color(1)
 
             imgui.tree_pop()
+        end
+    end)
+
+    -- Standalone stats overlay (always visible, doesn't need REFramework open)
+    re.on_frame(function()
+        local bd = battle.data
+        if true then
+            imgui.set_next_window_size({120, 0}, 4)  -- 4 = ImGuiCond_FirstUseEver
+            imgui.begin_window("Bot Stats", true, 1 + 2 + 4 + 32)  -- +NoTitleBar
+            local total = bd.wins + bd.losses
+            local pct = total > 0 and math.floor(bd.wins / total * 100) or 0
+
+            imgui.push_style_color(0, COL_STATUS_OK)
+            imgui.text(bd.wins .. "W")
+            imgui.pop_style_color(1)
+            imgui.same_line()
+            imgui.text("/")
+            imgui.same_line()
+            imgui.push_style_color(0, COL_STATUS_NO)
+            imgui.text(bd.losses .. "L")
+            imgui.pop_style_color(1)
+            imgui.same_line()
+            imgui.push_style_color(0, COL_MUTED)
+            imgui.text("(" .. pct .. "%)")
+            imgui.pop_style_color(1)
+
+            imgui.end_window()
         end
     end)
 end

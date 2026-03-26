@@ -133,6 +133,12 @@ local function update_state()
         log.debug(string.format("[state] fight_st: %s -> %s",
             FIGHT_ST_NAMES[prev_fight_st] or tostring(prev_fight_st),
             FIGHT_ST_NAMES[st] or tostring(st)))
+
+        -- Check round result when entering FINISH
+        if st == 5 and prev_fight_st == 4 then
+            battle.check_round_result()
+        end
+
         prev_fight_st = st
     end
 
