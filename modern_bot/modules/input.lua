@@ -35,6 +35,7 @@ local function release_all()   injected_vk = {} end
 
 module.inject_key = inject_key
 module.release_all = release_all
+VK.ESCAPE = 0x1B
 module.VK = VK
 
 ---------------------------------------------------------------------------
@@ -178,16 +179,11 @@ local function tick_move(cfg, battle)
         local back_key = facing_right and VK.A or VK.D
         inject_key(back_key)
 
-        -- Count charge frames during READY (3) and FIGHT (4)
-        local st = battle.data.fight_st
-        if st and st >= 3 and st <= 4 then
-            move_charge_timer = move_charge_timer + 1
-        end
+        move_charge_timer = move_charge_timer + 1
 
-        -- Check if actionable AND charged enough AND actively fighting
+        -- Check if actionable AND charged enough
         local act_st = battle.get_act_st()
-        if battle.data.is_fighting
-            and act_st and ACTIONABLE_STATES[act_st]
+        if act_st and ACTIONABLE_STATES[act_st]
             and move_charge_timer >= cfg.move_charge_min
         then
             move_ready_timer = move_ready_timer + 1
@@ -212,18 +208,6 @@ local function tick_move(cfg, battle)
         end
 
     elseif move_phase == MOVE_PHASE_JUMP then
-        -- Abort if no longer fighting
-        if not battle.data.is_fighting then
-            move_phase = MOVE_PHASE_CHARGE
-            move_charge_timer = 0
-            move_ready_timer = 0
-            move_delay_target = 0
-            move_current_buttons = nil
-            move_jump_dir = nil
-            move_jump_hold = 0
-            inject_key(VK.S)  -- resume charging
-            return
-        end
         -- Jump + attack + direction (all simultaneous)
         move_jump_timer = move_jump_timer + 1
         inject_key(VK.W)
@@ -251,7 +235,25 @@ local function tick_move(cfg, battle)
 end
 
 ---------------------------------------------------------------------------
--- Per-frame update (called from main hook when in match)
+-- READY state: charge only, no attacks
+---------------------------------------------------------------------------
+function module.on_ready(cfg, battle)
+    prev_injected_vk = {}
+    for vk, _ in pairs(injected_vk) do prev_injected_vk[vk] = true end
+    release_all()
+
+    -- Hold down-back for charge moves during countdown
+    if cfg.move_enabled then
+        inject_key(VK.S)
+        local facing_right = battle.get_facing()
+        local back_key = facing_right and VK.A or VK.D
+        inject_key(back_key)
+        move_charge_timer = move_charge_timer + 1
+    end
+end
+
+---------------------------------------------------------------------------
+-- FIGHTING state: full bot behavior
 ---------------------------------------------------------------------------
 function module.on_frame(cfg, battle)
     prev_injected_vk = {}

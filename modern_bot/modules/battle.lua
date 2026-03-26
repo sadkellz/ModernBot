@@ -1,8 +1,6 @@
 local module = {}
 
 module.data = {
-    in_match      = false,
-    is_fighting   = false,
     is_training   = false,
     frame         = 0,
     detected_side = nil,
@@ -120,101 +118,25 @@ local function try_detect_side(player_side_cfg)
 end
 
 ---------------------------------------------------------------------------
--- Match state
+-- Reset (called by state machine on new match)
 ---------------------------------------------------------------------------
-local function reset()
+function module.reset()
     module.data.detected_side = nil
-    module.data.is_fighting = false
     module.data.is_training = false
     module.data.game_mode = nil
     module.data.fight_st = nil
+    module.data.frame = 0
     bBattleFlow_instance = nil
-end
-
--- Periodic check for match exit (confirmBattleInput stops firing outside matches)
-re.on_frame(function()
-    if not module.data.in_match then return end
-    local flow = get_gBattle_field("Flow")
-    if not flow then
-        module.data.in_match = false
-        module.data.is_fighting = false
-        module.data.fight_st = nil
-        return
-    end
-    local ok, ended = pcall(flow.call, flow, "IsBattleEnd")
-    if ok and ended then
-        module.data.in_match = false
-        module.data.is_fighting = false
-        module.data.fight_st = nil
-    end
-end)
-
-local function update_match_state()
-    local flow = get_gBattle_field("Flow")
-    if not flow then
-        if module.data.in_match then
-            module.data.in_match = false
-            reset()
-        end
-        return false
-    end
-
-    local ok, ended = pcall(flow.call, flow, "IsBattleEnd")
-    local now = ok and not ended
-    if now and not module.data.in_match then
-        -- Entering match
-        module.data.in_match = true
-        module.data.frame = 0
-    elseif not now and module.data.in_match then
-        -- Leaving match (don't reset detected_side here, STAGE_INIT handles that)
-        module.data.in_match = false
-        module.data.is_fighting = false
-        module.data.fight_st = nil
-    end
-
-    -- Check fight phase
-    if module.data.in_match then
-        local game = get_gBattle_field("Game")
-        if game then
-            local ok2, st = pcall(game.call, game, "get_FightST")
-            local prev_st = module.data.fight_st
-            module.data.fight_st = ok2 and st or nil
-            module.data.is_fighting = ok2 and st == 4 or false  -- FIGHT_ST.NOW = 4
-
-            -- New match detected (STAGE_INIT): re-detect side
-            if ok2 and st == 0 and prev_st ~= 0 then
-                module.data.detected_side = nil
-                module.data.is_training = false
-                module.data.game_mode = nil
-                bBattleFlow_instance = nil
-                log.debug("[battle] New match detected (STAGE_INIT), resetting side")
-            end
-        end
-    end
-
-    return module.data.in_match
+    log.debug("[battle] Reset")
 end
 
 ---------------------------------------------------------------------------
--- Per-frame update
+-- Per-frame update (called from main hook)
 ---------------------------------------------------------------------------
 function module.on_frame(cfg)
-    if not update_match_state() then return end
     module.data.frame = module.data.frame + 1
     if not module.data.detected_side then
         try_detect_side(cfg.player_side)
-    end
-
-    -- Log side and facing once per second
-    if cfg.debug_log and module.data.frame % 60 == 1 then
-        local side = module.data.detected_side
-        local facing = module.get_facing()
-        local facing_str = facing == true and "right" or facing == false and "left" or "?"
-        local act = module.get_act_st_name()
-        log.debug(string.format("[battle] P%s facing_%s act=%s f%d fighting=%s training=%s",
-            side or "?", facing_str, act, module.data.frame,
-            tostring(module.data.is_fighting),
-            tostring(module.data.is_training)))
     end
 end
 

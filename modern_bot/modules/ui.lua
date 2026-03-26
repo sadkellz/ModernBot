@@ -35,6 +35,7 @@ function module.init(deps)
     local cfg = deps.cfg
     local config = deps.config
     local battle = deps.battle
+    local bot_state = deps.state
     local BUTTON_NAMES = deps.button_names
 
     re.on_draw_ui(function()
@@ -98,7 +99,9 @@ function module.init(deps)
             ---------------------------------------------------------------
             if section("Auto Rematch") then
             ---------------------------------------------------------------
-                changed, cfg.auto_rematch = imgui.checkbox("Enable##rematch", cfg.auto_rematch)
+                changed, cfg.auto_rematch = imgui.checkbox("Rematch##rematch", cfg.auto_rematch)
+                changed, cfg.auto_return = imgui.checkbox("Return if Declined##return", cfg.auto_return)
+                changed, cfg.auto_skip = imgui.checkbox("Skip Intros/Win Poses##skip", cfg.auto_skip)
                 imgui.tree_pop()
             end
 
@@ -121,15 +124,15 @@ function module.init(deps)
             imgui.spacing()
             imgui.separator()
             local bd = battle.data
-            local in_match = bd.in_match
+            local bs = bot_state and bot_state.current or "?"
 
-            if in_match then
+            local active = bs == "fighting" or bs == "ready" or bs == "loading"
+            if active then
                 imgui.push_style_color(0, COL_STATUS_OK)
-                imgui.text("IN MATCH")
             else
                 imgui.push_style_color(0, COL_STATUS_NO)
-                imgui.text("NO MATCH")
             end
+            imgui.text(string.upper(bs))
             imgui.pop_style_color(1)
 
             imgui.same_line()

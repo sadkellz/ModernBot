@@ -27,7 +27,7 @@ import os
 import argparse
 import re
 
-DUMP_PATH = r"Q:\SteamLibrary\steamapps\common\Street Fighter 6\scripts\dump\il2cpp_dump.json"
+DUMP_PATH = r"Q:\SteamLibrary\steamapps\common\Street Fighter 6\il2cpp_dump.json"
 
 _data = None
 

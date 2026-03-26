@@ -17,147 +17,239 @@ end
 local config = safe_require("modules/config")
 local battle = safe_require("modules/battle")
 local input  = safe_require("modules/input")
+local menu   = safe_require("modules/menu")
 local ui     = safe_require("modules/ui")
 
 local cfg = config and config.cfg
 
 ---------------------------------------------------------------------------
--- Main hook
+-- State machine
+---------------------------------------------------------------------------
+local FIGHT_ST_NAMES = {
+    [0] = "STAGE_INIT", [1] = "ROUND_INIT", [2] = "APPEAR", [3] = "READY",
+    [4] = "NOW", [5] = "FINISH", [6] = "WIN_WAIT", [7] = "WIN", [8] = "NUM",
+}
+
+local state = { current = "idle" }
+local prev_fight_st = nil
+local state_log_timer = 0
+
+local function set_state(new)
+    if new == state.current then return end
+    log.debug(string.format("[state] %s -> %s", state.current, new))
+
+    -- Reset battle data when entering a new match
+    if new == "loading" and (state.current == "idle" or state.current == "result" or state.current == "round_end") then
+        battle.reset()
+    end
+
+    if new == "round_end" then
+        round_end_frames = 0
+    end
+
+    state.current = new
+end
+
+---------------------------------------------------------------------------
+-- Per-state behavior
+---------------------------------------------------------------------------
+local function do_idle()
+    input.release_all()
+end
+
+local function do_loading()
+    input.release_all()
+    battle.on_frame(cfg)
+    -- Skip intro (APPEAR = fight_st 2)
+    if cfg.master and cfg.auto_skip and battle.data.fight_st == 2 then
+        input.inject_key(input.VK.ESCAPE)
+    end
+end
+
+local function do_ready()
+    battle.on_frame(cfg)
+    if not cfg.master
+        or (battle.data.is_training and not cfg.allow_training)
+        or not battle.data.detected_side
+    then
+        input.release_all()
+        return
+    end
+    input.on_ready(cfg, battle)
+end
+
+local function do_fighting()
+    battle.on_frame(cfg)
+    if not cfg.master
+        or (battle.data.is_training and not cfg.allow_training)
+        or not battle.data.detected_side
+    then
+        input.release_all()
+        return
+    end
+    input.on_frame(cfg, battle)
+end
+
+local round_end_frames = 0
+
+local function do_round_end()
+    input.release_all()
+    round_end_frames = round_end_frames + 1
+    -- Skip win pose (WIN_WAIT=6, WIN=7) — toggle ESC to generate fresh trigger
+    if cfg.master and cfg.auto_skip and battle.data.fight_st and battle.data.fight_st >= 6 then
+        if round_end_frames % 2 == 1 then
+            input.inject_key(input.VK.ESCAPE)
+        end
+    end
+end
+
+local function do_result()
+    -- Menu module handles this state via its own on_frame
+end
+
+---------------------------------------------------------------------------
+-- State transitions (driven by fight_st from gBattle.Game)
+---------------------------------------------------------------------------
+local function update_state()
+    local game = battle.get_game()
+
+    if not game then
+        -- No game object: go idle
+        if prev_fight_st ~= nil then
+            log.debug("[state] fight_st: " .. (FIGHT_ST_NAMES[prev_fight_st] or tostring(prev_fight_st)) .. " -> nil (no game)")
+            prev_fight_st = nil
+        end
+        if state.current ~= "result" then
+            set_state("idle")
+        end
+        return
+    end
+
+    local ok, st = pcall(game.call, game, "get_FightST")
+    if not ok or not st then return end
+
+    -- Log fight_st transitions
+    if st ~= prev_fight_st then
+        log.debug(string.format("[state] fight_st: %s -> %s",
+            FIGHT_ST_NAMES[prev_fight_st] or tostring(prev_fight_st),
+            FIGHT_ST_NAMES[st] or tostring(st)))
+        prev_fight_st = st
+    end
+
+    -- Update battle data
+    battle.data.fight_st = st
+
+    -- Transitions
+    if state.current == "idle" then
+        if st >= 0 and st <= 2 then set_state("loading")
+        elseif st == 3 then set_state("ready")
+        elseif st == 4 then set_state("fighting")
+        end
+
+    elseif state.current == "loading" then
+        if st == 3 then set_state("ready")
+        elseif st == 4 then set_state("fighting")
+        elseif st >= 5 then set_state("round_end")
+        end
+
+    elseif state.current == "ready" then
+        if st == 4 then set_state("fighting")
+        elseif st >= 5 then set_state("round_end")
+        elseif st <= 2 then set_state("loading")
+        end
+
+    elseif state.current == "fighting" then
+        if st >= 5 then set_state("round_end")
+        elseif st <= 2 then set_state("loading")
+        elseif st == 3 then set_state("ready")
+        end
+
+    elseif state.current == "round_end" then
+        if st >= 0 and st <= 2 then set_state("loading")
+        elseif st == 3 then set_state("ready")
+        elseif st == 4 then set_state("fighting")
+        end
+        -- result transition handled by menu module hook
+
+    elseif state.current == "result" then
+        if st >= 0 and st <= 2 then set_state("loading")
+        elseif st == 3 then set_state("ready")
+        elseif st == 4 then set_state("fighting")
+        end
+    end
+end
+
+---------------------------------------------------------------------------
+-- Main battle hook (runs at game tick rate, not render rate)
 ---------------------------------------------------------------------------
 sdk.hook(
     sdk.find_type_definition("app.FBattleInput"):get_method("confirmBattleInput"),
     function(args) end,
     function(retval)
-        battle.on_frame(cfg)
-
-        if not cfg.master
-            or (battle.data.is_training and not cfg.allow_training)
-            or not battle.data.in_match
-            or not battle.data.detected_side
-        then
-            input.release_all()
-            return retval
+        if state.current == "fighting" then
+            do_fighting()
+        elseif state.current == "ready" then
+            do_ready()
+        elseif state.current == "loading" then
+            do_loading()
         end
-
-        input.on_frame(cfg, battle)
-
         return retval
     end
 )
 
 ---------------------------------------------------------------------------
--- Safety: check gBattle.Flow directly to detect match end
--- (confirmBattleInput hook stops firing after match, so battle.data goes stale)
+-- Frame update: transitions + state behavior
 ---------------------------------------------------------------------------
 re.on_frame(function()
-    local game = battle.get_game()
-    if game then
-        local ok, st = pcall(game.call, game, "get_FightST")
-        if ok and st then
-            battle.data.fight_st = st
-            battle.data.is_fighting = (st == 4)
-            if st >= 5 then
-                battle.data.in_match = false
-                input.release_all()
-                return
-            end
-        end
-    else
-        if battle.data.in_match then
-            battle.data.in_match = false
-            battle.data.is_fighting = false
-            battle.data.fight_st = nil
-        end
+    update_state()
+
+    -- Run per-state behavior for non-hook states
+    if state.current == "idle" then
+        do_idle()
+    elseif state.current == "round_end" then
+        do_round_end()
+    elseif state.current == "result" then
+        do_result()
     end
 
-    if not battle.data.in_match or not battle.data.detected_side then
-        input.release_all()
+    -- Periodic state dump
+    state_log_timer = state_log_timer + 1
+    if cfg.debug_log and state_log_timer >= 60 then
+        state_log_timer = 0
+        local side = battle.data.detected_side
+        local facing = battle.get_facing()
+        local facing_str = facing == true and "right" or facing == false and "left" or "?"
+        local menu_state = menu and menu.data.state or "n/a"
+        log.debug("[state] --- Periodic ---")
+        log.debug("[state]   bot:       " .. state.current)
+        log.debug("[state]   fight_st:  " .. (FIGHT_ST_NAMES[battle.data.fight_st] or tostring(battle.data.fight_st)))
+        log.debug("[state]   side:      P" .. (side or "?"))
+        log.debug("[state]   facing:    " .. facing_str)
+        log.debug("[state]   menu:      " .. menu_state)
+        log.debug("[state]   training:  " .. tostring(battle.data.is_training))
     end
 end)
 
 ---------------------------------------------------------------------------
--- Auto-rematch
+-- Init modules
 ---------------------------------------------------------------------------
-local result_controller = nil
-local result_state = "idle"  -- idle | waiting | rematch_sent
-local result_timer = 0
-local REMATCH_DELAY = 120       -- frames before pressing rematch
-
-do
-    local rc_type = sdk.find_type_definition("app.ResultController")
-    if rc_type then
-        local m_activate = rc_type:get_method("Activate")
-        if m_activate then
-            sdk.hook(m_activate,
-                function(args)
-                    result_controller = sdk.to_managed_object(args[2])
-                    if cfg.auto_rematch and cfg.master then
-                        result_state = "waiting"
-                        result_timer = REMATCH_DELAY
-                        log.debug("[bot] Result screen detected, waiting to rematch")
-                    end
-                end,
-                function(retval) return retval end
-            )
-            log.debug("[bot] Hooked ResultController.Activate")
-        end
-
-        local m_deactivate = rc_type:get_method("Deactivate")
-        if m_deactivate then
-            sdk.hook(m_deactivate,
-                function(args)
-                    if result_state ~= "idle" then
-                        log.debug("[bot] Result screen closed (opponent quit or timeout), resetting")
-                        result_state = "idle"
-                        result_timer = 0
-                        result_controller = nil
-                    end
-                end,
-                function(retval) return retval end
-            )
-        end
-    else
-        log.debug("[bot] WARNING: Could not find app.ResultController")
-    end
+if menu then
+    menu.init({
+        cfg = cfg,
+        battle = battle,
+        input = input,
+        state = state,
+        set_state = set_state,
+    })
 end
 
-re.on_frame(function()
-    -- Reset when a new match starts
-    if battle.data.in_match and result_state ~= "idle" then
-        log.debug("[bot] New match started, resetting result state")
-        result_state = "idle"
-        result_timer = 0
-        result_controller = nil
-        return
-    end
-
-    if result_state == "idle" or not result_controller then return end
-
-    result_timer = result_timer - 1
-    if result_timer > 0 then return end
-
-    if result_state == "waiting" then
-        log.debug("[bot] Requesting rematch (SetDecide(0))")
-        local side_idx = (battle.data.detected_side or 1) - 1
-        local ok, err = pcall(result_controller.call, result_controller, "SetDecide", side_idx)
-        if ok then
-            result_state = "rematch_sent"
-            log.debug("[bot] Rematch requested, waiting for opponent")
-        else
-            log.debug("[bot] SetDecide failed: " .. tostring(err))
-            result_state = "idle"
-        end
-    end
-end)
-
----------------------------------------------------------------------------
--- Init UI
----------------------------------------------------------------------------
 if ui then
     ui.init({
         cfg = cfg,
         config = config,
         battle = battle,
+        menu = menu,
+        state = state,
         button_names = input.BUTTON_NAMES,
     })
 end

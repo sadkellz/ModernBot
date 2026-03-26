@@ -23,6 +23,8 @@ local DEFAULTS = {
     move_jump_max      = 5,
     allow_training = false,
     auto_rematch   = false,
+    auto_return    = false,
+    auto_skip      = false,
     player_side   = 0,  -- 0=Auto, 1=P1, 2=P2
 }
 
