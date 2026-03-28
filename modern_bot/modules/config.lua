@@ -16,7 +16,6 @@ local DEFAULTS = {
     hold_forward  = false,
     hold_back     = false,
     move_enabled  = false,
-    move_charge_min    = 45,
     move_delay_min     = 10,
     move_delay_max     = 45,
     move_jump_min      = 2,

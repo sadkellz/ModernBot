@@ -86,7 +86,7 @@ function module.init(deps)
             ---------------------------------------------------------------
                 changed, cfg.move_enabled = imgui.checkbox("Enable##move", cfg.move_enabled)
                 imgui.text("Charge down, then random: L / M / H / M+H")
-                changed, cfg.move_charge_min = imgui.slider_int("Min Charge (f)", cfg.move_charge_min, 1, 120)
+                imgui.text("(Uses game's charge state detection)")
                 changed, cfg.move_delay_min = imgui.slider_int("Delay Min (f)", cfg.move_delay_min, 1, 120)
                 changed, cfg.move_delay_max = imgui.slider_int("Delay Max (f)", cfg.move_delay_max, 1, 120)
                 if cfg.move_delay_max < cfg.move_delay_min then cfg.move_delay_max = cfg.move_delay_min end
@@ -110,8 +110,12 @@ function module.init(deps)
             ---------------------------------------------------------------
                 changed, cfg.debug_log = imgui.checkbox("Debug Log", cfg.debug_log)
                 if imgui.button("Reset Stats") then
-                    battle.data.wins = 0
-                    battle.data.losses = 0
+                    battle.data.round_wins = 0
+                    battle.data.round_losses = 0
+                    battle.data.match_wins = 0
+                    battle.data.match_losses = 0
+                    battle.data.set_round_wins = 0
+                    battle.data.set_round_losses = 0
                 end
                 imgui.same_line()
                 if imgui.button("Save") then config.save() end
@@ -154,28 +158,52 @@ function module.init(deps)
     -- Standalone stats overlay (always visible, doesn't need REFramework open)
     re.on_frame(function()
         local bd = battle.data
-        if true then
-            imgui.set_next_window_size({120, 0}, 4)  -- 4 = ImGuiCond_FirstUseEver
-            imgui.begin_window("Bot Stats", true, 1 + 2 + 4 + 32)  -- +NoTitleBar
-            local total = bd.wins + bd.losses
-            local pct = total > 0 and math.floor(bd.wins / total * 100) or 0
+        imgui.set_next_window_size({140, 60}, 0)  -- ImGuiCond_Always
+        imgui.begin_window("Bot Stats", true, 1 + 2 + 4 + 32)  -- NoResize | NoMove | NoCollapse | NoTitleBar
 
-            imgui.push_style_color(0, COL_STATUS_OK)
-            imgui.text(bd.wins .. "W")
-            imgui.pop_style_color(1)
-            imgui.same_line()
-            imgui.text("/")
-            imgui.same_line()
-            imgui.push_style_color(0, COL_STATUS_NO)
-            imgui.text(bd.losses .. "L")
-            imgui.pop_style_color(1)
-            imgui.same_line()
-            imgui.push_style_color(0, COL_MUTED)
-            imgui.text("(" .. pct .. "%)")
-            imgui.pop_style_color(1)
+        -- Match stats
+        imgui.push_style_color(0, COL_MUTED)
+        imgui.text("M:")
+        imgui.pop_style_color(1)
+        imgui.same_line()
+        local m_total = bd.match_wins + bd.match_losses
+        local m_pct = m_total > 0 and math.floor(bd.match_wins / m_total * 100) or 0
+        imgui.push_style_color(0, COL_STATUS_OK)
+        imgui.text(bd.match_wins .. "W")
+        imgui.pop_style_color(1)
+        imgui.same_line()
+        imgui.push_style_color(0, COL_STATUS_NO)
+        imgui.text(bd.match_losses .. "L")
+        imgui.pop_style_color(1)
+        imgui.same_line()
+        imgui.push_style_color(0, COL_MUTED)
+        imgui.text("(" .. m_pct .. "%)")
+        imgui.pop_style_color(1)
 
-            imgui.end_window()
-        end
+        -- Round stats
+        imgui.push_style_color(0, COL_MUTED)
+        imgui.text("R:")
+        imgui.pop_style_color(1)
+        imgui.same_line()
+        local r_total = bd.round_wins + bd.round_losses
+        local r_pct = r_total > 0 and math.floor(bd.round_wins / r_total * 100) or 0
+        imgui.push_style_color(0, COL_STATUS_OK)
+        imgui.text(bd.round_wins .. "W")
+        imgui.pop_style_color(1)
+        imgui.same_line()
+        imgui.push_style_color(0, COL_STATUS_NO)
+        imgui.text(bd.round_losses .. "L")
+        imgui.pop_style_color(1)
+        imgui.same_line()
+        imgui.push_style_color(0, COL_MUTED)
+        imgui.text("(" .. r_pct .. "%)")
+        imgui.pop_style_color(1)
+
+        imgui.push_style_color(0, COL_MUTED)
+        imgui.text(battle.get_act_st_name())
+        imgui.pop_style_color(1)
+
+        imgui.end_window()
     end)
 end
 

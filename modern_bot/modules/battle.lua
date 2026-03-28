@@ -6,8 +6,12 @@ module.data = {
     detected_side = nil,
     game_mode     = nil,
     fight_st      = nil,
-    wins          = 0,
-    losses        = 0,
+    round_wins    = 0,
+    round_losses  = 0,
+    match_wins    = 0,
+    match_losses  = 0,
+    set_round_wins  = 0,  -- rounds won in current match
+    set_round_losses = 0, -- rounds lost in current match
 }
 
 ---------------------------------------------------------------------------
@@ -132,6 +136,13 @@ function module.reset()
     log.debug("[battle] Reset")
 end
 
+--- Called when a new match starts (not between rounds).
+--- Resets the per-match set counters.
+function module.reset_set()
+    module.data.set_round_wins = 0
+    module.data.set_round_losses = 0
+end
+
 ---------------------------------------------------------------------------
 -- Per-frame update (called from main hook)
 ---------------------------------------------------------------------------
@@ -159,17 +170,52 @@ function module.get_facing()
     return rl_dir
 end
 
---- ACT_ST.ID enum names for logging
+--- ACT_ST.ID enum (from il2cpp dump, backing type SByte)
 local ACT_ST_NAMES = {
-    [0] = "NONE", "STAND", "STAND_TURN", "SIT", "SIT_TURN", "SITD",
-    "WALK", "DUCK_WALK", "FOOTWORK", "DASH", "KDASH",
-    "JUMP", "JUMP_NORM", "JUMP_RET", "JUMP_LAND",
-    "SJUMP", "SJUMP_NORM", "SJUMP_RET", "SJUMP_DMG",
-    "WJUMP", "WSJUMP", "TJUMP",
-    "ATCK", "ATCK_LAND", "DEF", "JDEF", "PARRY",
-    "CATCH", "NOKI", "NIJI", "HOLD",
-    "DAMAGE", "FALL", "GETUP", "UKEMI", "SLEEP",
-    "FLYING", "SPECIAL", "SUPER", "TOUCH", "WITHDRAW", "WIN",
+    [0]   = "FOOTWORK",
+    [1]   = "SIT",
+    [2]   = "WIN",
+    [3]   = "SITD",
+    [4]   = "STAND",
+    [5]   = "STAND_TURN",
+    [6]   = "SIT_TURN",
+    [7]   = "NIJI",
+    [8]   = "WALK",
+    [9]   = "DUCK_WALK",
+    [10]  = "DASH",
+    [11]  = "NOKI",
+    [12]  = "KDASH",
+    [13]  = "ATCK_LAND",
+    [14]  = "JUMP",
+    [15]  = "JUMP_NORM",
+    [16]  = "JUMP_LAND",
+    [17]  = "JUMP_RET",
+    [18]  = "SJUMP",
+    [19]  = "SJUMP_NORM",
+    [20]  = "SJUMP_DMG",
+    [21]  = "SJUMP_RET",
+    [22]  = "FLYING",
+    [23]  = "WJUMP",
+    [24]  = "WSJUMP",
+    [25]  = "TJUMP",
+    [26]  = "FALL",
+    [27]  = "DEF",
+    [28]  = "JDEF",
+    [29]  = "ATCK",
+    [30]  = "SPECIAL",
+    [31]  = "SUPER",
+    [32]  = "DAMAGE",
+    [33]  = "_33",
+    [34]  = "SLEEP",
+    [35]  = "GETUP",
+    [36]  = "UKEMI",
+    [37]  = "CATCH",
+    [38]  = "HOLD",
+    [39]  = "PARRY",
+    [40]  = "TOUCH",
+    [41]  = "WITHDRAW",
+    [42]  = "NUM",
+    [255] = "NONE",
 }
 
 --- Returns the act_st value for our player, or nil.
@@ -199,11 +245,32 @@ function module.check_round_result()
 
     local my_team = (module.data.detected_side or 1) - 1  -- 0-indexed
     if winner == my_team then
-        module.data.wins = module.data.wins + 1
-        log.debug("[battle] Round won! (" .. module.data.wins .. "W / " .. module.data.losses .. "L)")
+        module.data.round_wins = module.data.round_wins + 1
+        module.data.set_round_wins = module.data.set_round_wins + 1
+        log.debug(string.format("[battle] Round won! (R: %dW/%dL | Set: %d-%d)",
+            module.data.round_wins, module.data.round_losses,
+            module.data.set_round_wins, module.data.set_round_losses))
     elseif winner >= 0 then
-        module.data.losses = module.data.losses + 1
-        log.debug("[battle] Round lost. (" .. module.data.wins .. "W / " .. module.data.losses .. "L)")
+        module.data.round_losses = module.data.round_losses + 1
+        module.data.set_round_losses = module.data.set_round_losses + 1
+        log.debug(string.format("[battle] Round lost. (R: %dW/%dL | Set: %d-%d)",
+            module.data.round_wins, module.data.round_losses,
+            module.data.set_round_wins, module.data.set_round_losses))
+    end
+
+    -- Check for match win/loss (Bo3: first to 2 rounds)
+    if module.data.set_round_wins >= 2 then
+        module.data.match_wins = module.data.match_wins + 1
+        log.debug(string.format("[battle] Match won! (M: %dW/%dL)",
+            module.data.match_wins, module.data.match_losses))
+        module.data.set_round_wins = 0
+        module.data.set_round_losses = 0
+    elseif module.data.set_round_losses >= 2 then
+        module.data.match_losses = module.data.match_losses + 1
+        log.debug(string.format("[battle] Match lost. (M: %dW/%dL)",
+            module.data.match_wins, module.data.match_losses))
+        module.data.set_round_wins = 0
+        module.data.set_round_losses = 0
     end
 end
 
@@ -217,9 +284,39 @@ function module.get_game()
     return get_gBattle_field("Game")
 end
 
---- Returns the captured bBattleFlow instance, or nil.
-function module.get_bBattleFlow_instance()
-    return bBattleFlow_instance
+--- Returns true if the current player has a completed charge.
+--- Reads ChargeInfo.complete from Command.UserEngine's charge dictionary.
+function module.is_charge_complete()
+    local cmd = get_gBattle_field("Command")
+    if not cmd then return false end
+    local pl_id = (module.data.detected_side or 1) - 1
+
+    local ok_e, engine = pcall(cmd.call, cmd, "Engine", pl_id)
+    if not ok_e or not engine then return false end
+
+    local ok_c, charge_infos = pcall(engine.get_field, engine, "m_charge_infos")
+    if not ok_c or not charge_infos then return false end
+
+    local ok_count, count = pcall(charge_infos.call, charge_infos, "get_Count")
+    if not ok_count or not count or count == 0 then return false end
+
+    local ok_vals, vals = pcall(charge_infos.call, charge_infos, "get_Values")
+    if not ok_vals or not vals then return false end
+
+    local ok_enum, enumerator = pcall(vals.call, vals, "GetEnumerator")
+    if not ok_enum or not enumerator then return false end
+
+    for i = 0, count - 1 do
+        local ok_n, hn = pcall(enumerator.call, enumerator, "MoveNext")
+        if not ok_n or not hn then break end
+        local ok_cur, info = pcall(enumerator.call, enumerator, "get_Current")
+        if ok_cur and info then
+            local ok_co, co = pcall(info.get_field, info, "complete")
+            if ok_co and co and co ~= 0 then return true end
+        end
+    end
+
+    return false
 end
 
 return module

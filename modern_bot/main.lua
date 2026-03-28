@@ -33,16 +33,22 @@ local FIGHT_ST_NAMES = {
 local state = { current = "idle" }
 local prev_fight_st = nil
 local state_log_timer = 0
+local round_end_frames = 0
 
 local function set_state(new)
     if new == state.current then return end
     log.debug(string.format("[state] %s -> %s", state.current, new))
 
-    -- Reset battle data when entering a new match
-    if new == "loading" and (state.current == "idle" or state.current == "result" or state.current == "round_end") then
-        battle.reset()
+    if new == "loading" then
+        -- New match from idle/result: full reset including set counters
+        if state.current == "idle" or state.current == "result" then
+            battle.reset()
+            battle.reset_set()
+        -- New round within same match: reset battle state but keep set counters
+        elseif state.current == "round_end" then
+            battle.reset()
+        end
     end
-
     if new == "round_end" then
         round_end_frames = 0
     end
@@ -89,8 +95,6 @@ local function do_fighting()
     end
     input.on_frame(cfg, battle)
 end
-
-local round_end_frames = 0
 
 local function do_round_end()
     input.release_all()

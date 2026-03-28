@@ -7,6 +7,7 @@ local VK = {
     W = 87, A = 65, S = 83, D = 68, F = 70,
     U = 85, I = 73, O = 79,
     J = 74, K = 75, L = 76,
+    ESCAPE = 0x1B,
 }
 
 local BUTTONS = {
@@ -35,7 +36,6 @@ local function release_all()   injected_vk = {} end
 
 module.inject_key = inject_key
 module.release_all = release_all
-VK.ESCAPE = 0x1B
 module.VK = VK
 
 ---------------------------------------------------------------------------
@@ -133,8 +133,7 @@ local MOVE_PHASE_CHARGE = 1
 local MOVE_PHASE_JUMP   = 2
 
 local move_phase = MOVE_PHASE_CHARGE
-local move_charge_timer = 0   -- total frames spent holding down
-local move_ready_timer = 0    -- frames actionable after charge_min met
+local move_ready_timer = 0    -- frames actionable after charge complete
 local move_jump_timer = 0
 local move_delay_target = 0
 local move_current_buttons = nil
@@ -151,18 +150,18 @@ local MOVE_OPTIONS = {
 local JUMP_DIRS = { "neutral", "forward", "back" }
 
 local ACTIONABLE_STATES = {
-    [1] = true,   -- STAND
-    [3] = true,   -- SIT
-    [5] = true,   -- SITD
-    [6] = true,   -- WALK
-    [7] = true,   -- DUCK_WALK
-    [8] = true,   -- FOOTWORK
+    [0] = true,   -- FOOTWORK
+    [1] = true,   -- SIT
+    [3] = true,   -- SITD
+    [4] = true,   -- STAND
+    [8] = true,   -- WALK
+    [9] = true,   -- DUCK_WALK
 }
 
 local function tick_move(cfg, battle)
     if not cfg.move_enabled then
         move_phase = MOVE_PHASE_CHARGE
-        move_charge_timer = 0
+
         move_ready_timer = 0
         move_jump_timer = 0
         move_delay_target = 0
@@ -179,13 +178,11 @@ local function tick_move(cfg, battle)
         local back_key = facing_right and VK.A or VK.D
         inject_key(back_key)
 
-        move_charge_timer = move_charge_timer + 1
 
-        -- Check if actionable AND charged enough
+
+        -- Check if actionable AND charge is complete (read from game state)
         local act_st = battle.get_act_st()
-        if act_st and ACTIONABLE_STATES[act_st]
-            and move_charge_timer >= cfg.move_charge_min
-        then
+        if act_st and ACTIONABLE_STATES[act_st] and battle.is_charge_complete() then
             move_ready_timer = move_ready_timer + 1
 
             -- Pick a delay target on first ready frame
@@ -224,7 +221,7 @@ local function tick_move(cfg, battle)
         if move_jump_timer >= move_jump_hold then
             -- Back to charging
             move_phase = MOVE_PHASE_CHARGE
-            move_charge_timer = 0
+    
             move_ready_timer = 0
             move_delay_target = 0
             move_current_buttons = nil
@@ -248,7 +245,7 @@ function module.on_ready(cfg, battle)
         local facing_right = battle.get_facing()
         local back_key = facing_right and VK.A or VK.D
         inject_key(back_key)
-        move_charge_timer = move_charge_timer + 1
+
     end
 end
 
