@@ -1,5 +1,6 @@
 """
 Search the il2cpp_dump.json for types, fields, methods, and properties.
+The il2cpp_dump.json can be dumped via REFramework.
 
 Usage:
     python il2cpp_search.py <command> <query> [options]
@@ -16,6 +17,7 @@ Commands:
     offset <type> <off>   Find what field is at a given offset in a type
 
 Options:
+    --dump PATH           Path to il2cpp_dump.json (default: SF6 install)
     --exact               Exact match instead of substring
     --limit N             Max results (default: 20)
     --json                Output raw JSON
@@ -27,15 +29,16 @@ import os
 import argparse
 import re
 
-DUMP_PATH = r"Q:\SteamLibrary\steamapps\common\Street Fighter 6\il2cpp_dump.json"
+DEFAULT_DUMP_PATH = r"Q:\SteamLibrary\steamapps\common\Street Fighter 6\il2cpp_dump.json"
 
 _data = None
+_dump_path = None
 
 def load_dump():
     global _data
     if _data is None:
         print(f"Loading dump (this takes a moment)...", file=sys.stderr)
-        with open(DUMP_PATH, "r") as f:
+        with open(_dump_path, "r") as f:
             _data = json.load(f)
         print(f"Loaded {len(_data)} types.", file=sys.stderr)
     return _data
@@ -263,7 +266,9 @@ def cmd_offset(args):
 
 
 def main():
+    global _dump_path
     parser = argparse.ArgumentParser(description="Search SF6 il2cpp_dump.json")
+    parser.add_argument("--dump", default=DEFAULT_DUMP_PATH, help="Path to il2cpp_dump.json")
     parser.add_argument("--exact", action="store_true", help="Exact match")
     parser.add_argument("--limit", type=int, default=20, help="Max results")
 
@@ -298,6 +303,8 @@ def main():
     p.add_argument("query", help="Offset like 0xb8")
 
     args = parser.parse_args()
+
+    _dump_path = args.dump
 
     if not args.command:
         parser.print_help()
