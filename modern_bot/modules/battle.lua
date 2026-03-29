@@ -218,6 +218,18 @@ local ACT_ST_NAMES = {
     [255] = "NONE",
 }
 
+--- Returns the current super gauge value for our player, or 0.
+function module.get_super_gauge()
+    local idx = module.get_my_index()
+    local p = get_player(idx - 1)
+    if not p then return 0 end
+    local ok, val = pcall(p.call, p, "getSuperGauge")
+    if ok and val then
+        log.debug(string.format("[battle] Super gauge: %d", val))
+    end
+    return ok and val or 0
+end
+
 --- Returns the act_st value for our player, or nil.
 function module.get_act_st()
     local idx = module.get_my_index()
@@ -284,8 +296,7 @@ function module.get_game()
     return get_gBattle_field("Game")
 end
 
---- Returns true if the current player has a completed charge.
---- Reads ChargeInfo.complete from Command.UserEngine's charge dictionary.
+--- Returns true if the down-charge (index 1) has charge_frame >= 40.
 function module.is_charge_complete()
     local cmd = get_gBattle_field("Command")
     if not cmd then return false end
@@ -297,26 +308,25 @@ function module.is_charge_complete()
     local ok_c, charge_infos = pcall(engine.get_field, engine, "m_charge_infos")
     if not ok_c or not charge_infos then return false end
 
-    local ok_count, count = pcall(charge_infos.call, charge_infos, "get_Count")
-    if not ok_count or not count or count == 0 then return false end
-
     local ok_vals, vals = pcall(charge_infos.call, charge_infos, "get_Values")
     if not ok_vals or not vals then return false end
 
     local ok_enum, enumerator = pcall(vals.call, vals, "GetEnumerator")
     if not ok_enum or not enumerator then return false end
 
-    for i = 0, count - 1 do
+    -- Skip to index 1 (down charge)
+    for i = 0, 1 do
         local ok_n, hn = pcall(enumerator.call, enumerator, "MoveNext")
-        if not ok_n or not hn then break end
-        local ok_cur, info = pcall(enumerator.call, enumerator, "get_Current")
-        if ok_cur and info then
-            local ok_co, co = pcall(info.get_field, info, "complete")
-            if ok_co and co and co ~= 0 then return true end
-        end
+        if not ok_n or not hn then return false end
     end
 
-    return false
+    local ok_cur, info = pcall(enumerator.call, enumerator, "get_Current")
+    if not ok_cur or not info then return false end
+
+    local ok_cf, cf = pcall(info.get_field, info, "charge_frame")
+    if not ok_cf or not cf then return false end
+
+    return cf >= 40
 end
 
 return module

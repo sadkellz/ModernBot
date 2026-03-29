@@ -87,11 +87,13 @@ local pulse_timer = 0
 local pulse_holding = 0
 local cur_interval = 60
 local cur_hold = 3
+local pulse_auto_active = false
 
 local function tick_pulse(cfg)
     if not cfg.enabled then return end
     if pulse_holding > 0 then
         inject_key(BUTTONS[cfg.pulse_btn_idx].vk)
+        if pulse_auto_active then inject_key(VK.L) end
         pulse_holding = pulse_holding - 1
         return
     end
@@ -101,7 +103,9 @@ local function tick_pulse(cfg)
         cur_hold = math.random(cfg.hold_min, cfg.hold_max)
         cur_interval = math.random(cfg.interval_min, cfg.interval_max)
         pulse_holding = cur_hold
+        pulse_auto_active = cfg.pulse_auto_chance > 0 and math.random(1, 100) <= cfg.pulse_auto_chance
         inject_key(BUTTONS[cfg.pulse_btn_idx].vk)
+        if pulse_auto_active then inject_key(VK.L) end
     end
 end
 
@@ -232,6 +236,107 @@ local function tick_move(cfg, battle)
 end
 
 ---------------------------------------------------------------------------
+-- Wakeup Super (on GETUP, randomly pick SA1/2/3 based on gauge)
+---------------------------------------------------------------------------
+local wakeup_super_level = 0
+local wakeup_super_mash_timer = 0
+local wakeup_super_mash_target = 0
+local wakeup_super_pressing = false
+local wakeup_super_getup_frame = 0
+local wakeup_super_start_delay = 0
+local ACT_ST_GETUP = 35
+
+local function pick_super_level(gauge, cfg)
+    local bars = math.floor(gauge / 10000)
+    if bars <= 0 then return 0 end
+    local options = {}
+    if bars >= 1 and cfg.wakeup_sa1 then options[#options + 1] = 1 end
+    if bars >= 2 and cfg.wakeup_sa2 then options[#options + 1] = 2 end
+    if bars >= 3 and cfg.wakeup_sa3 then options[#options + 1] = 3 end
+    if #options == 0 then return 0 end
+    return options[math.random(1, #options)]
+end
+
+local function tick_wakeup_super(cfg, battle)
+    if not cfg.wakeup_super_enabled then
+        wakeup_super_level = 0
+        wakeup_super_frame = 0
+        return
+    end
+
+    local act_st = battle.get_act_st()
+
+    if act_st ~= ACT_ST_GETUP then
+        wakeup_super_level = 0
+        wakeup_super_mash_timer = 0
+        wakeup_super_mash_target = 0
+        wakeup_super_pressing = false
+        wakeup_super_getup_frame = 0
+        wakeup_super_start_delay = 0
+        return
+    end
+
+    wakeup_super_getup_frame = wakeup_super_getup_frame + 1
+
+    if wakeup_super_level == -1 then return end  -- already decided to skip
+
+    -- Pick start delay and level once on first getup frame
+    if wakeup_super_level == 0 then
+        wakeup_super_start_delay = math.random(3, 6)
+        if math.random(1, 100) > cfg.wakeup_super_chance then
+            wakeup_super_level = -1  -- skip this getup
+            return
+        end
+        local gauge = battle.get_super_gauge()
+        wakeup_super_level = pick_super_level(gauge, cfg)
+        if wakeup_super_level == 0 then return end
+        wakeup_super_pressing = false
+        wakeup_super_mash_timer = 0
+        wakeup_super_mash_target = math.random(2, 4)  -- initial press duration
+    end
+
+    -- Wait before starting to mash
+    if wakeup_super_getup_frame < wakeup_super_start_delay then return end
+
+    -- Hold only the super's direction (no down-back)
+    local facing_right = battle.get_facing()
+    local back_key = facing_right and VK.A or VK.D
+
+    if wakeup_super_level == 2 then
+        inject_key(back_key)       -- SA2: back + SP+H
+    elseif wakeup_super_level == 3 then
+        inject_key(VK.S)           -- SA3: down + SP+H
+    end
+    -- SA1: neutral, no direction
+
+    -- Human-like mashing: random hold (2-5f) then random release (1-3f)
+    wakeup_super_mash_timer = wakeup_super_mash_timer + 1
+    if wakeup_super_mash_timer >= wakeup_super_mash_target then
+        wakeup_super_mash_timer = 0
+        wakeup_super_pressing = not wakeup_super_pressing
+        if wakeup_super_pressing then
+            wakeup_super_mash_target = math.random(2, 5)  -- hold for 2-5 frames
+        else
+            wakeup_super_mash_target = math.random(1, 3)  -- release for 1-3 frames
+        end
+    end
+
+    if wakeup_super_pressing then
+        inject_key(VK.I)  -- SP
+        inject_key(VK.K)  -- Heavy
+    else
+        -- While "releasing", randomly hold one of the two buttons
+        local r = math.random(1, 3)
+        if r == 1 then
+            inject_key(VK.I)  -- hold SP
+        elseif r == 2 then
+            inject_key(VK.K)  -- hold Heavy
+        end
+        -- r == 3: both released
+    end
+end
+
+---------------------------------------------------------------------------
 -- READY state: charge only, no attacks
 ---------------------------------------------------------------------------
 function module.on_ready(cfg, battle)
@@ -257,8 +362,16 @@ function module.on_frame(cfg, battle)
     for vk, _ in pairs(injected_vk) do prev_injected_vk[vk] = true end
     release_all()
 
+    -- Wakeup super takes over all inputs when active
+    local act_st = battle.get_act_st()
+    if cfg.wakeup_super_enabled and act_st == ACT_ST_GETUP and wakeup_super_level ~= -1 then
+        tick_wakeup_super(cfg, battle)
+        return
+    end
+
     tick_pulse(cfg)
     tick_move(cfg, battle)
+    tick_wakeup_super(cfg, battle)
     apply_holds(cfg, battle)
 end
 

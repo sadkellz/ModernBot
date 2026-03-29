@@ -67,6 +67,7 @@ function module.init(deps)
                 changed, cfg.hold_min = imgui.slider_int("Hold Min (f)", cfg.hold_min, 1, 30)
                 changed, cfg.hold_max = imgui.slider_int("Hold Max (f)", cfg.hold_max, 1, 30)
                 if cfg.hold_max < cfg.hold_min then cfg.hold_max = cfg.hold_min end
+                changed, cfg.pulse_auto_chance = imgui.slider_int("Auto Chance (%)", cfg.pulse_auto_chance, 0, 100)
                 imgui.tree_pop()
             end
 
@@ -93,6 +94,20 @@ function module.init(deps)
                 changed, cfg.move_jump_min = imgui.slider_int("Hold Min (f)##move", cfg.move_jump_min, 1, 30)
                 changed, cfg.move_jump_max = imgui.slider_int("Hold Max (f)##move", cfg.move_jump_max, 1, 30)
                 if cfg.move_jump_max < cfg.move_jump_min then cfg.move_jump_max = cfg.move_jump_min end
+                imgui.tree_pop()
+            end
+
+            ---------------------------------------------------------------
+            if section("Wakeup Super") then
+            ---------------------------------------------------------------
+                changed, cfg.wakeup_super_enabled = imgui.checkbox("Enable##wakeup_super", cfg.wakeup_super_enabled)
+                changed, cfg.wakeup_sa1 = imgui.checkbox("SA1##wk", cfg.wakeup_sa1)
+                imgui.same_line()
+                changed, cfg.wakeup_sa2 = imgui.checkbox("SA2##wk", cfg.wakeup_sa2)
+                imgui.same_line()
+                changed, cfg.wakeup_sa3 = imgui.checkbox("SA3##wk", cfg.wakeup_sa3)
+                changed, cfg.wakeup_super_chance = imgui.slider_int("Chance (%)", cfg.wakeup_super_chance, 0, 100)
+                imgui.text("(Randomly picks from checked + affordable)")
                 imgui.tree_pop()
             end
 
