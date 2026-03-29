@@ -18,7 +18,7 @@ SF6 bot that reads live game state and injects inputs to automate fighting and m
 - **Charge Move** -- hold down-back, wait for the game's charge state, then jump + attack. Reads `charge_frame` directly from the engine.
 - **Wakeup Super** -- on getup, mash SA1/SA2/SA3 (configurable per-level toggles and % chance). Human-like input timing.
 - **Auto Rematch** -- automatically rematch, return to lobby if declined, skip intros/win poses.
-- **Side Detection** -- auto-detects P1/P2 side in online and training mode.
+- **Side Detection** -- auto-detects P1/P2 side in an online match, but can also be manually set.
 - **Win/Loss Tracking** -- per-round and per-match stats shown in an always-visible overlay.
 
 ## Config
