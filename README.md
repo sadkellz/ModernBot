@@ -23,4 +23,4 @@ SF6 bot that reads live game state and injects inputs to automate fighting and m
 
 ## Config
 
-Settings are saved to `modern_bot_cfg.json` via the Save button. Automatically loads on first run/reset or can me loaded via the Load button.
+Settings are saved to `modern_bot_cfg.json` via the Save button. Automatically loads on first run/reset or can be loaded via the Load button.
