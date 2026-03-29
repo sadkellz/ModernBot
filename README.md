@@ -8,6 +8,9 @@ SF6 bot that reads live game state and injects inputs to automate fighting and m
 2. Copy `modern_bot/` into your REFramework `reframework/autorun/` folder
 3. Launch the game -- the bot UI appears in the REFramework menu
 
+> [!CAUTION]
+> REFramework automatically disables scripts when entering any online mode.
+
 ## Features
 
 - **Pulse Input** -- press a button at random intervals with configurable hold/release timing. Optional Auto button co-press.
